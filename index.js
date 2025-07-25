@@ -4,11 +4,20 @@ import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import cors from "cors"; // <--- NEU
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// CORS aktivieren: Freigabe für dein Frontend!
+app.use(cors({
+  origin: "https://make.ki-sicherheit.jetzt", // Nur deine Domain freigeben
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"]
+}));
+
 app.use(bodyParser.text({ type: '*/*', limit: '5mb' }));
 app.use('/templates', express.static(path.join(__dirname, 'templates')));
 
@@ -23,8 +32,7 @@ app.post("/generate-pdf", async (req, res) => {
   try {
     const reportHtml = req.body;
 
-    // Passe hier die HTML-Quelle an: HTML aus Request oder aus Template-Datei
-    // Tipp: reportHtml sollte dein vollständiges HTML für den Report sein, z. B. wie nach dem Rendern mit Variablen
+    // Tipp: reportHtml sollte dein vollständiges HTML für den Report sein
     const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
     const page = await browser.newPage();
 
