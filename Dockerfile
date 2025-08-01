@@ -20,6 +20,7 @@ RUN apt-get update && \
         xdg-utils \
         libgbm1 \
         libgtk-3-0 \
+        chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
@@ -37,8 +38,13 @@ COPY . .
 # Expose the port your service listens on (change if needed)
 EXPOSE 3000
 
-# Set environment variables if necessary (e.g., Puppeteer Chromium path)
-# ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Set environment variables so that Puppeteer does not download its own
+# copy of Chromium. Instead we rely on the system-installed binary via
+# apt-get. If your project does not use Puppeteer these variables are
+# harmless. Should you wish to customise the executable path, adjust
+# PUPPETEER_EXECUTABLE_PATH accordingly.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Define the command to run your service
 CMD ["node", "index.js"]
