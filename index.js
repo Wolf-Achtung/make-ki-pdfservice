@@ -17,10 +17,14 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 // CORS aktivieren: Freigabe für dein Frontend!
+// CORS aktivieren: Freigabe für dein Frontend!
+// Neben "Content-Type" müssen hier alle Header aufgeführt werden, die die
+// Anwendung akzeptieren soll. Für den Versand der Benutzer‑Adresse im
+// X-User-Email‑Header erweitern wir die Liste entsprechend.
 app.use(cors({
   origin: "https://make.ki-sicherheit.jetzt", // Nur deine Domain freigeben
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"]
+  allowedHeaders: ["Content-Type", "X-User-Email"]
 }));
 
 app.use(bodyParser.text({ type: '*/*', limit: '5mb' }));
