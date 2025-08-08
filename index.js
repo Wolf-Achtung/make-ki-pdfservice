@@ -5,6 +5,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 import cors from "cors"; // <--- NEU
+// Optional: SMTP email support.  When configured via environment
+// variables, the PDF service can automatically forward a copy of the
+// generated report to an administrator.  The following import is only
+// used when ADMIN_EMAIL is set.
+import nodemailer from "nodemailer";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +51,66 @@ app.post("/generate-pdf", async (req, res) => {
     });
 
     await browser.close();
+
+    // -----------------------------------------------------------------------
+    // ✉️  Optional e‑mail forwarding for administrators
+    //
+    // If an ADMIN_EMAIL environment variable is defined, the service will
+    // attempt to forward the generated PDF report as an e‑mail attachment.
+    // The sender and SMTP credentials can be customized via the following
+    // environment variables:
+    //   SMTP_HOST   – hostname of the SMTP server
+    //   SMTP_PORT   – port number (defaults to 465 when secure, 587 otherwise)
+    //   SMTP_USER   – SMTP username
+    //   SMTP_PASS   – SMTP password
+    //   SMTP_SECURE – "true" to enable TLS/SSL on the specified port
+    //   SMTP_FROM   – optional "from" address (fallbacks to ADMIN_EMAIL)
+    //
+    // Additionally, the client may specify the end‑user’s email address in
+    // the `X-User-Email` header to include it in the subject or body of the
+    // administrative notification.  This header is optional and has no
+    // functional effect on the PDF generation itself.
+    const adminEmail = process.env.ADMIN_EMAIL;
+    if (adminEmail) {
+      try {
+        const smtpHost = process.env.SMTP_HOST || "smtp.example.com";
+        const smtpPort = parseInt(process.env.SMTP_PORT || (process.env.SMTP_SECURE === "true" ? "465" : "587"), 10);
+        const smtpUser = process.env.SMTP_USER;
+        const smtpPass = process.env.SMTP_PASS;
+        const smtpSecure = process.env.SMTP_SECURE === "true";
+        const smtpFrom = process.env.SMTP_FROM || adminEmail;
+
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpSecure,
+          auth: smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined,
+        });
+
+        const userEmail = req.headers["x-user-email"] || "";
+        const subject = userEmail
+          ? `Neuer KI‑Readiness‑Report von ${userEmail}`
+          : `Neuer KI‑Readiness‑Report`;
+        const textBody = userEmail
+          ? `Es wurde ein neuer KI‑Readiness‑Report von ${userEmail} erstellt. Im Anhang findest du das PDF.`
+          : `Es wurde ein neuer KI‑Readiness‑Report erstellt. Im Anhang findest du das PDF.`;
+        await transporter.sendMail({
+          from: smtpFrom,
+          to: adminEmail,
+          subject: subject,
+          text: textBody,
+          attachments: [
+            {
+              filename: "KI-Readiness-Report.pdf",
+              content: pdfBuffer,
+            },
+          ],
+        });
+      } catch (emailErr) {
+        // Log but do not fail the PDF request if e‑mail delivery fails.
+        console.error("[PDFSERVICE] Fehler beim Senden der Admin‑E‑Mail:", emailErr);
+      }
+    }
 
     res.set({
       "Content-Type": "application/pdf",
