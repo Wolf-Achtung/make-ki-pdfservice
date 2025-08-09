@@ -1,57 +1,32 @@
-# Use official Node.js runtime as the base image. Choose a slim variant to keep the image small.
-FROM node:18-slim
+#
+# Dockerfile für den KI‑Readiness‑PDF‑Service
+#
+# Diese Variante verwendet das vorgefertigte Puppeteer‑Image mit
+# vorinstalliertem Chrome. Dadurch entfallen langwierige apt‑get‑
+# Installationen von Systembibliotheken und der Build bleibt schnell und
+# stabil. Das Image `ghcr.io/puppeteer/puppeteer` wird vom Puppeteer‑Team
+# gepflegt und enthält Node.js sowie alle benötigten Chromium‑Runtime‑
+# Bibliotheken. Der Dienst bleibt unverändert – er startet einen
+# Headless‑Browser, rendert das übermittelte HTML und gibt das PDF
+# zurück. Optional kann eine E‑Mail mit dem PDF an einen Administrator
+# gesendet werden.
 
-# Installiere systemabhängige Bibliotheken, die für den von Puppeteer
-# heruntergeladenen Chromium-Browser benötigt werden. Ohne diese
-# Bibliotheken kann Chrome nicht starten (Fehler wie "cannot open shared
-# object file: libgio-2.0.so.0" werden sonst geworfen). Wir verzichten
-# bewusst auf die Installation eines vollständigen systemweiten Chromiums,
-# installieren aber alle benötigten Shared Libraries. Das erhöht zwar
-# leicht die Buildzeit, verhindert aber Laufzeitfehler beim PDF‑Export.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        fonts-liberation \
-        libasound2 \
-        libatk-bridge2.0-0 \
-        libnspr4 \
-        libnss3 \
-        libxss1 \
-        libx11-xcb1 \
-        libxcomposite1 \
-        libxdamage1 \
-        libxi6 \
-        libxrandr2 \
-        xdg-utils \
-        libgbm1 \
-        libgtk-3-0 \
-        libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+FROM ghcr.io/puppeteer/puppeteer:latest
 
-
-# Create app directory
+# Arbeitsverzeichnis festlegen
 WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json and install dependencies
+# package.json und package-lock.json kopieren und Abhängigkeiten
+# installieren. Wir verzichten bewusst auf dev‑Dependencies, um das
+# Image kompakt zu halten.
 COPY package*.json ./
-
-# Install only production dependencies. Use --omit=dev to speed up install.
 RUN npm install --omit=dev
 
-# Copy the rest of the application source code
+# Quellcode kopieren
 COPY . .
 
-# Expose the port your service listens on (change if needed)
-EXPOSE 3000
+# Port für den Express‑Server freigeben
+EXPOSE 8080
 
-# Set environment variables so that Puppeteer does not download its own
-# copy of Chromium. Instead we rely on the system-installed binary via
-# apt-get. If your project does not use Puppeteer these variables are
-# harmless. Should you wish to customise the executable path, adjust
-# PUPPETEER_EXECUTABLE_PATH accordingly.
-# Nutze Puppeteer mit der eigenen Chromium-Version. Wir setzen keine
-# PUPPETEER_SKIP_DOWNLOAD-Variablen, damit während `npm install` die
-# benötigte Chromium-Binary heruntergeladen wird.
-
-# Define the command to run your service
+# Startkommando für den PDF‑Service
 CMD ["node", "index.js"]
