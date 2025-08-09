@@ -11,6 +11,22 @@ body {
   font-family: 'Inter', Arial, sans-serif;
   color: #223561;
 }
+
+/* Verhindere Seitenumbrüche innerhalb von Absätzen, Listen und Tabellen */
+p, ul, ol, li, table {
+  page-break-inside: avoid;
+}
+
+
+/* Verhindere Seitenumbrüche innerhalb von Absätzen, Listen und Tabellen */
+p, ul, ol, li, table {
+  page-break-inside: avoid;
+}
+
+/* Reduziere die Schriftgröße für Fließtext leicht für bessere Lesbarkeit */
+.chapter-box {
+  font-size: 1em;
+}
 .logo-row {
   display: flex;
   justify-content: center;
@@ -57,7 +73,8 @@ h2 {
   margin: 0 auto 21px auto;
   max-width: 16cm;
   color: #223561;
-  font-size: 1.11em;
+  /* Die Schriftgröße wurde leicht reduziert, um lange Texte kompakter darzustellen */
+  font-size: 1.05em;
   line-height: 1.65;
   page-break-inside: avoid;
   word-break: break-word;
@@ -137,11 +154,8 @@ th {
 <body>
 
 <!-- LOGO-ZEILE -->
-<div class="logo-row">
-  <!-- Use absolute paths so logos resolve correctly in the PDF service -->
-  <img src="/templates/ki-ready-2025.webp" alt="KI-Ready 2025" />
-  <img src="/templates/ki-sicherheit-logo.webp" alt="KI-Sicherheit.jetzt" />
-</div>
+<!-- LOGO-ZEILE: temporär ausgeblendet für Testzwecke -->
+<div class="logo-row"></div>
 
 <!-- TITELSEITE -->
 <div class="report-section">
@@ -152,10 +166,8 @@ th {
 </div>
 
 <!-- ICON-ZEILE RECHTS OBEN -->
-<div class="icon-row">
-  <img src="/templates/dsgvo.svg" alt="DSGVO-Konform" title="DSGVO-Konform" />
-  <img src="/templates/eu-ai.svg" alt="EU AI Act Ready" title="EU AI Act Ready" />
-</div>
+<!-- ICON-ZEILE RECHTS OBEN: temporär ausgeblendet für Testzwecke -->
+<div class="icon-row"></div>
 
 <!-- SCORE‑ÜBERSICHT -->
 {% if score_percent %}
@@ -391,6 +403,26 @@ th {
   <div class="chapter-box">
     <h2>Checklisten & Leitfäden</h2>
     <div>{{ checklisten | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- GLOSSAR -->
+{% if glossar %}
+<div class="report-section" style="page-break-before: always;">
+  <div class="chapter-box">
+    <h2>Glossar</h2>
+    <div>{{ glossar | safe }}</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- GLOSSAR -->
+{% if glossar %}
+<div class="report-section" style="page-break-before: always;">
+  <div class="chapter-box">
+    <h2>Glossar</h2>
+    <div>{{ glossar | safe }}</div>
   </div>
 </div>
 {% endif %}
