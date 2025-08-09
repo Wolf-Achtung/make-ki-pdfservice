@@ -1,27 +1,11 @@
 # Use official Node.js runtime as the base image. Choose a slim variant to keep the image small.
 FROM node:18-slim
 
-# Install system dependencies required for headless Chrome / Puppeteer. If your
-# service does not rely on Puppeteer you can omit these packages.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        fonts-liberation \
-        libasound2 \
-        libatk-bridge2.0-0 \
-        libnspr4 \
-        libnss3 \
-        libxss1 \
-        libx11-xcb1 \
-        libxcomposite1 \
-        libxdamage1 \
-        libxi6 \
-        libxrandr2 \
-        xdg-utils \
-        libgbm1 \
-        libgtk-3-0 \
-        chromium \
-    && rm -rf /var/lib/apt/lists/*
+# Die Installation eines systemweiten Chromium über apt-get wurde entfernt, um
+# den Build zu beschleunigen. Puppeteer lädt seine eigene Version von
+# Chromium während `npm install`. Dadurch reduziert sich die Größe des
+# Basisimages und die Buildzeit.
+
 
 # Create app directory
 WORKDIR /usr/src/app
@@ -43,8 +27,9 @@ EXPOSE 3000
 # apt-get. If your project does not use Puppeteer these variables are
 # harmless. Should you wish to customise the executable path, adjust
 # PUPPETEER_EXECUTABLE_PATH accordingly.
-ENV PUPPETEER_SKIP_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Nutze Puppeteer mit der eigenen Chromium-Version. Wir setzen keine
+# PUPPETEER_SKIP_DOWNLOAD-Variablen, damit während `npm install` die
+# benötigte Chromium-Binary heruntergeladen wird.
 
 # Define the command to run your service
 CMD ["node", "index.js"]
