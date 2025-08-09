@@ -1,10 +1,32 @@
 # Use official Node.js runtime as the base image. Choose a slim variant to keep the image small.
 FROM node:18-slim
 
-# Die Installation eines systemweiten Chromium über apt-get wurde entfernt, um
-# den Build zu beschleunigen. Puppeteer lädt seine eigene Version von
-# Chromium während `npm install`. Dadurch reduziert sich die Größe des
-# Basisimages und die Buildzeit.
+# Installiere systemabhängige Bibliotheken, die für den von Puppeteer
+# heruntergeladenen Chromium-Browser benötigt werden. Ohne diese
+# Bibliotheken kann Chrome nicht starten (Fehler wie "cannot open shared
+# object file: libgio-2.0.so.0" werden sonst geworfen). Wir verzichten
+# bewusst auf die Installation eines vollständigen systemweiten Chromiums,
+# installieren aber alle benötigten Shared Libraries. Das erhöht zwar
+# leicht die Buildzeit, verhindert aber Laufzeitfehler beim PDF‑Export.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        fonts-liberation \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libnspr4 \
+        libnss3 \
+        libxss1 \
+        libx11-xcb1 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxi6 \
+        libxrandr2 \
+        xdg-utils \
+        libgbm1 \
+        libgtk-3-0 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 
 # Create app directory
