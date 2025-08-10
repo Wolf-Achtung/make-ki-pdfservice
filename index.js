@@ -75,44 +75,62 @@ app.post("/generate-pdf", async (req, res) => {
     // administrative notification.  This header is optional and has no
     // functional effect on the PDF generation itself.
     const adminEmail = process.env.ADMIN_EMAIL;
-    if (adminEmail) {
+    const userEmail = req.headers["x-user-email"] || "";
+    if (adminEmail || userEmail) {
       try {
         const smtpHost = process.env.SMTP_HOST || "smtp.example.com";
         const smtpPort = parseInt(process.env.SMTP_PORT || (process.env.SMTP_SECURE === "true" ? "465" : "587"), 10);
         const smtpUser = process.env.SMTP_USER;
         const smtpPass = process.env.SMTP_PASS;
         const smtpSecure = process.env.SMTP_SECURE === "true";
-        const smtpFrom = process.env.SMTP_FROM || adminEmail;
-
+        const smtpFrom = process.env.SMTP_FROM || adminEmail || userEmail;
         const transporter = nodemailer.createTransport({
           host: smtpHost,
           port: smtpPort,
           secure: smtpSecure,
           auth: smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined,
         });
-
-        const userEmail = req.headers["x-user-email"] || "";
-        const subject = userEmail
-          ? `Neuer KI‑Readiness‑Report von ${userEmail}`
-          : `Neuer KI‑Readiness‑Report`;
-        const textBody = userEmail
-          ? `Es wurde ein neuer KI‑Readiness‑Report von ${userEmail} erstellt. Im Anhang findest du das PDF.`
-          : `Es wurde ein neuer KI‑Readiness‑Report erstellt. Im Anhang findest du das PDF.`;
-        await transporter.sendMail({
-          from: smtpFrom,
-          to: adminEmail,
-          subject: subject,
-          text: textBody,
-          attachments: [
-            {
-              filename: "KI-Readiness-Report.pdf",
-              content: pdfBuffer,
-            },
-          ],
-        });
+        // Versende an Admin (sofern konfiguriert)
+        if (adminEmail) {
+          const subjectAdmin = userEmail
+            ? `Neuer KI‑Readiness‑Report von ${userEmail}`
+            : `Neuer KI‑Readiness‑Report`;
+          const textBodyAdmin = userEmail
+            ? `Es wurde ein neuer KI‑Readiness‑Report von ${userEmail} erstellt. Im Anhang findest du das PDF.`
+            : `Es wurde ein neuer KI‑Readiness‑Report erstellt. Im Anhang findest du das PDF.`;
+          await transporter.sendMail({
+            from: smtpFrom,
+            to: adminEmail,
+            subject: subjectAdmin,
+            text: textBodyAdmin,
+            attachments: [
+              {
+                filename: "KI-Readiness-Report.pdf",
+                content: pdfBuffer,
+              },
+            ],
+          });
+        }
+        // Versende an Benutzer, falls E‑Mail übermittelt wurde
+        if (userEmail) {
+          const subjectUser = `Ihr KI‑Readiness‑Report`;
+          const textBodyUser = `Vielen Dank für Ihre Angaben. Anbei erhalten Sie Ihren individuellen KI‑Readiness‑Report im PDF‑Format.`;
+          await transporter.sendMail({
+            from: smtpFrom,
+            to: userEmail,
+            subject: subjectUser,
+            text: textBodyUser,
+            attachments: [
+              {
+                filename: "KI-Readiness-Report.pdf",
+                content: pdfBuffer,
+              },
+            ],
+          });
+        }
       } catch (emailErr) {
         // Log but do not fail the PDF request if e‑mail delivery fails.
-        console.error("[PDFSERVICE] Fehler beim Senden der Admin‑E‑Mail:", emailErr);
+        console.error("[PDFSERVICE] Fehler beim Senden der E‑Mail:", emailErr);
       }
     }
 
