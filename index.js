@@ -1,5 +1,7 @@
 import express from "express";
-import puppeteer from "puppeteer";
+// Verwende puppeteer-core, um nur die Steuerbibliothek zu laden. Der eigentliche
+// Chromium‑Browser wird vom Basis‑Image bereitgestellt (via CHROMIUM_PATH).
+import puppeteer from "puppeteer-core";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -42,7 +44,12 @@ app.post("/generate-pdf", async (req, res) => {
     const reportHtml = req.body;
 
     // Tipp: reportHtml sollte dein vollständiges HTML für den Report sein
-    const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+    // Starte den Browser. `executablePath` verweist auf den Chrome aus dem Basis‑Image.
+    const browser = await puppeteer.launch({
+      headless: 'new',
+      executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
     const page = await browser.newPage();
 
     // Asset-Pfade fixen: Falls Logos im Template relativ sind, müssen sie z. B. "/templates/ki-sicherheit-logo.png" heißen

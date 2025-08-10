@@ -13,6 +13,13 @@
 
 FROM ghcr.io/puppeteer/puppeteer:latest
 
+# Verhindert, dass Puppeteer während der Installation eine eigene Chromium‑Version
+# herunterlädt. Die Basis des Images bringt bereits einen kompatiblen
+# Headless‑Browser mit. Ohne diese Variable würde `npm install puppeteer`
+# erneut ein großes Binary herunterladen und den Build in die Länge ziehen.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV CHROMIUM_PATH=/usr/bin/chromium
+
 # Arbeitsverzeichnis festlegen
 WORKDIR /usr/src/app
 
