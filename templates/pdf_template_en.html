@@ -149,8 +149,9 @@ th {
 <!-- LOGO ROW -->
 <div class="logo-row">
   <!-- Use absolute paths so logos resolve correctly in the PDF service -->
-  <img src="/templates/ki-ready-2025.webp" alt="AI-Ready 2025" />
-  <img src="/templates/ki-sicherheit-logo.webp" alt="KI-Sicherheit.jetzt" />
+  <!-- Embedded logos as Base64 for offline availability -->
+  <img src="{{KI_READY_BASE64}}" alt="AI-Ready 2025" />
+  <img src="{{KI_SICHERHEIT_BASE64}}" alt="KI-Sicherheit.jetzt" />
 </div>
 
 <!-- TITLE PAGE -->
@@ -163,8 +164,8 @@ th {
 
 <!-- ICON ROW TOP RIGHT -->
 <div class="icon-row">
-  <img src="/templates/dsgvo.svg" alt="GDPR compliant" title="GDPR compliant" />
-  <img src="/templates/eu-ai.svg" alt="EU AI Act ready" title="EU AI Act ready" />
+  <img src="{{DSGVO_BASE64}}" alt="GDPR compliant" title="GDPR compliant" />
+  <img src="{{EU_AI_BASE64}}" alt="EU AI Act ready" title="EU AI Act ready" />
 </div>
 
 <!-- SCORE OVERVIEW -->
