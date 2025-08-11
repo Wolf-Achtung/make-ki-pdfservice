@@ -1,7 +1,12 @@
 import express from "express";
 // Verwende puppeteer-core, um nur die Steuerbibliothek zu laden. Der eigentliche
 // Chromium‑Browser wird vom Basis‑Image bereitgestellt (via CHROMIUM_PATH).
+// Verwende puppeteer-core zusammen mit @sparticuz/chromium. Die
+// Bibliothek @sparticuz/chromium liefert eine portable Chrome‑Binary,
+// die serverless‑freundlich ist. Puppeteer‑core steuert diesen
+// Browser. Wir verzichten dadurch auf eine systemweite Chrome‑Installation.
 import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 import bodyParser from "body-parser";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -45,10 +50,14 @@ app.post("/generate-pdf", async (req, res) => {
 
     // Tipp: reportHtml sollte dein vollständiges HTML für den Report sein
     // Starte den Browser. `executablePath` verweist auf den Chrome aus dem Basis‑Image.
+    // Starte den Browser. chromium.args und chromium.executablePath
+    // stammen aus @sparticuz/chromium und liefern die korrekten
+    // Einstellungen für die serverless‑Umgebung. Kein weiteres
+    // System‑Chrome erforderlich.
     const browser = await puppeteer.launch({
-      headless: 'new',
-      executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
     });
     const page = await browser.newPage();
 
