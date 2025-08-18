@@ -6,18 +6,17 @@ import nodemailer from "nodemailer";
 
 const app = express();
 
-// Body-Parser: Text **und** JSON, großzügiges Limit (Base64-Logos!)
-app.use(express.text({ type: ["text/*","application/xhtml+xml","*/*"], limit: "10mb" }));
+// Größere Bodies zulassen (HTML mit Base64 kann groß sein)
+app.use(express.text({ type: ["text/*", "application/xhtml+xml", "*/*"], limit: "10mb" }));
 app.use(express.json({ limit: "10mb" }));
 
-// CORS (für Browser-Tests; Backend-zu-Backend braucht es nicht zwingend)
 app.use(cors({
   origin: "https://make.ki-sicherheit.jetzt",
   methods: ["GET","POST","OPTIONS"],
   allowedHeaders: ["Content-Type","X-User-Email"]
 }));
 
-app.get("/health", (req,res)=> res.json({ ok:true, ts: Date.now() }));
+app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.post("/generate-pdf", async (req, res) => {
   try {
@@ -42,7 +41,6 @@ app.post("/generate-pdf", async (req, res) => {
     });
     await browser.close();
 
-    // Mail (optional)
     const adminEmail = process.env.ADMIN_EMAIL;
     if (adminEmail || userEmail) {
       try {
@@ -77,7 +75,6 @@ app.post("/generate-pdf", async (req, res) => {
         }
       } catch (emailErr) {
         console.error("[PDFSERVICE] E-Mail-Fehler:", emailErr);
-        // PDF-Antwort trotzdem liefern
       }
     }
 
