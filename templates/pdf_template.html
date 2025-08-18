@@ -1,439 +1,186 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <title>KI‑Readiness‑Report 2025</title>
-  
-  {% if BASE_URL %}<base href="{{ BASE_URL.rstrip(\'/\') }}/templates/">{% endif %}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ report_title | KI-Readiness-Report }}</title>
 <style>
-body {
-  background: #fff;
-  margin: 0;
-  padding: 0;
-  font-family: 'Inter', Arial, sans-serif;
-  color: #223561;
+:root{
+  --ink:#0b1220; --muted:#6b7787; --bg:#ffffff;
+  --brand:#2a7bff; --ok:#16a34a; --warn:#d97706; --err:#dc2626; --info:#0ea5e9;
+  --line:#e6e9ee; --chip:#f3f6fb;
 }
-.logo-row {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 38px;
-  margin-top: 24px;
-  margin-bottom: 22px;
-}
-.logo-row img {
-  height: 74px;
-  object-fit: contain;
-}
-h1 {
-  font-size: 2.5em;
-  text-align: center;
-  color: #1e3a8a;
-  letter-spacing: 1.5px;
-  font-weight: 700;
-  margin: 38px 0 12px 0;
-  text-shadow: 0 1px 0 #e3ebfa;
-}
-h2 {
-  color: #2563eb;
-  font-size: 1.25em;
-  font-weight: 700;
-  margin-top: 0;
-  margin-bottom: 18px;
-  border-bottom: 1.5px solid #e8eefd;
-  padding-bottom: 4px;
-  letter-spacing: 0.7px;
-}
-.subtitle {
-  font-size: 1.21em;
-  text-align: center;
-  color: #1e40af;
-  margin-bottom: 42px;
-  font-weight: 500;
-  letter-spacing: 0.6px;
-}
-.chapter-box {
-  background: #f4f8fc;
-  border-radius: 16px;
-  padding: 30px 32px;
-  margin: 0 auto 21px auto;
-  max-width: 16cm;
-  color: #223561;
-  /* leicht reduzierte Grundschrift für bessere Lesbarkeit und weniger Zeilenumbrüche */
-  font-size: 1.05em;
-  line-height: 1.65;
-  page-break-inside: avoid;
-  word-break: break-word;
-  border: 1.25px solid #d1e3fa;
-  box-shadow: 0 2px 14px #e8eefd3b;
-}
-.hauptleistung-infobox {
-  background: #f0f6fb;
-  border-left: 5px solid #2563eb;
-  padding: 13px 24px;
-  margin: 0 0 18px 0;
-  font-size: 1.11em;
-  font-weight: 500;
-  color: #1e40af;
-  letter-spacing: 0.17px;
-  border-radius: 10px;
-}
-ul, ol {
-  margin-left: 0;
-  margin-bottom: 1.2em;
-  /* Verhindere Seitenumbrüche innerhalb von Listen */
-  page-break-inside: avoid;
-  padding-left: 1.5em;
-  list-style-position: outside;
-}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;color:var(--ink);background:var(--bg);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font: 12.5pt/1.45 "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;}
+/* Extra bottom padding so fixed footer doesn't overlap content */
+.container{max-width:960px;margin:0 auto;padding:24px 28px 88px}
+h1,h2,h3{margin:0 0 10px 0;line-height:1.2}
+h1{font-size:28pt}
+h2{font-size:18pt;margin-top:18px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:13.5pt;margin-top:12px}
+p,li{color:var(--ink)}
+p.muted, .muted{color:var(--muted)}
+hr{border:none;border-top:1px solid var(--line);margin:18px 0}
+.small{font-size:10pt}
+.badge{display:inline-flex;align-items:center;gap:6px;background:var(--chip);color:var(--ink);border:1px solid var(--line);padding:6px 10px;border-radius:999px;font-size:10pt}
+.grid{display:grid;gap:16px}
+.cols-2{grid-template-columns:1fr 1fr}
+.box{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff}
+.kicker{letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-size:10pt}
+.meta{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.meta .left{display:flex;gap:12px;align-items:center}
+.logo{height:40px;max-width:160px;object-fit:contain}
+img.logo[loading]{opacity:.8}
+img.logo:where([src=""], [src="undefined"], [src="null"]){display:none}
+.logo-fallback{font-weight:600;font-size:14pt;letter-spacing:.02em;background:var(--chip);border:1px solid var(--line);padding:6px 10px;border-radius:10px}
 
-li {
-  margin-bottom: 0.4em;
-  page-break-inside: avoid;
-}
-b { color: #2563eb; }
-@page {
-  margin: 32mm 18mm 28mm 18mm;
-  @bottom-center {
-    content: "TÜV-zertifiziertes KI-Management • © 2025: Wolf Hohl | "
-      "kontakt@ki-sicherheit.jetzt | Seite " counter(page) " von " counter(pages);
-    color: #aab8cc;
-    font-family: 'Inter', Arial, sans-serif;
-    font-size: 9pt;
-    opacity: 0.81;
-  }
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 1em;
-  margin-bottom: 1.5em;
-  font-size: 1.05em;
-  border: 1px solid #d1e3fa;
-}
-th, td {
-  border: 1px solid #d1e3fa;
-  padding: 8px 10px;
-  text-align: left;
-}
-th {
-  background-color: #e7f0fd;
-  color: #1e40af;
-  font-weight: 600;
-}
+/* Score Ring */
+.score{--p: calc(1*var(--score, 0)); position:relative;width:160px;height:160px;border-radius:50%;
+  background:conic-gradient(var(--brand) calc(var(--p)*1%), #e8edf5 0);
+  display:grid;place-items:center;margin:auto}
+.score > .inner{width:124px;height:124px;border-radius:50%;background:#fff;border:1px solid var(--line);display:grid;place-items:center;text-align:center;padding:8px}
+.score b{font-size:22pt}
+.score span{font-size:10pt;color:var(--muted)}
 
-thead { display: table-header-group; }
-tfoot { display: table-footer-group; }
-tr, td, th { page-break-inside: avoid; break-inside: avoid; }
-.table, .table tbody, .table tr { page-break-inside: avoid; break-inside: avoid; }
-.icon-row {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 8px;
-}
-.icon-row img {
-  height: 26px;
-  vertical-align: middle;
-}
-.score-box {
-  /* Verwende eine CI-konforme Blauton-Box für den Score */
-  background: #e7f0fd;
-  border-left: 5px solid #2563eb;
-  padding: 20px 28px;
-  margin: 0 auto 26px auto;
-  max-width: 16cm;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(37, 99, 235, 0.12);
-  font-size: 1.15em;
-  color: #153e75;
-}
-.score-box b {
-  color: #1e40af;
-}
-  </style>
+/* Cover */
+.cover{display:grid;gap:18px;margin-top:24px}
+.cover .hero{display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:center}
+.hero .title{padding:6px 0}
+.cover-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.card{background:linear-gradient(180deg,#fff, #f9fbff);border:1px solid var(--line);padding:12px;border-radius:12px}
+.card .label{font-size:10pt;color:var(--muted)}
+.card .value{font-size:14pt;font-weight:600}
+
+/* Footer */
+.footer{position:fixed;bottom:0;left:0;right:0;border-top:1px solid var(--line);background:#fff}
+.footer .container{padding:8px 28px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.footer .foot-left{display:flex;flex-direction:column;gap:2px;max-width:80%}
+.page-num:after{counter-increment: page; content: "Seite " counter(page)}
+
+/* Page breaks */
+.page-break{break-after:page}
+.avoid-break{break-inside:avoid}
+
+/* Lists */
+ul.clean{margin:8px 0 0 18px}
+ul.clean>li{margin:4px 0}
+
+/* Callouts */
+.callout{border-left:4px solid var(--brand);background:linear-gradient(180deg,#ffffff,#f7fbff);padding:12px;border-radius:8px;border:1px solid var(--line)}
+.callout.ok{border-left-color:var(--ok)}
+.callout.warn{border-left-color:var(--warn)}
+.callout.err{border-left-color:var(--err)}
+</style>
 </head>
 <body>
 
-{% set wants_funding = (interesse_foerderung in ['ja', 'unklar']) if interesse_foerderung is defined else True %}
-
-
-<!-- LOGO-ZEILE -->
-<div class="logo-row">
-  <!-- Use absolute paths so logos resolve correctly in the PDF service -->
-  <img src="{{ KI_READY_BASE64 or 'ki-ready-2025.webp' }}" alt="KI-Ready 2025" />
-  <img src="{{ KI_SICHERHEIT_BASE64 or 'ki-sicherheit-logo.png' }}" alt="KI-Sicherheit.jetzt" />
-</div>
-
-<!-- TITELSEITE -->
-<div class="report-section">
-  <div>
-    <h1>KI‑Readiness‑Report 2025</h1>
-    <div class="subtitle">Zukunftssichere KI‑Strategie für Unternehmen</div>
-  </div>
-</div>
-
-<!-- ICON-ZEILE RECHTS OBEN -->
-<div class="icon-row">
-  <img src="{{ DSGVO_BASE64 or 'dsgvo.svg' }}" alt="DSGVO-Konform" title="DSGVO-Konform" />
-  <img src="{{ EU_AI_BASE64 or 'eu-ai.svg' }}" alt="EU AI Act Ready" title="EU AI Act Ready" />
-</div>
-
-<!-- SCORE‑ÜBERSICHT -->
-{% if score_percent %}
-<div class="score-box">
-  <p><b>KI‑Readiness‑Score:</b> {{ score_percent }} % von 100 %</p>
-  <p>Dieser Wert zeigt, wie gut Ihr Unternehmen aktuell für den Einsatz von KI vorbereitet ist. Je höher der Wert, desto stärker sind Ihre digitale Reife, Ihre Automatisierung und Ihr internes Know‑how ausgeprägt.</p>
-</div>
-{% endif %}
-
-<!-- STATISCHE EINFÜHRUNG (PREFACE) -->
-{% if preface %}
-<div class="report-section">
-  <!-- Preface box: hellblaues Panel mit dunkelblauem Rand -->
-  <div class="chapter-box" style="background:#e7f0fd; border-left:4px solid #2563eb;">
-    {{ preface | safe }}
-  </div>
-</div>
-{% endif %}
-
-<!-- INHALTSVERZEICHNIS -->
-{% if executive_summary or summary_klein or summary_kmu or summary_solo or gesamtstrategie or roadmap or compliance or datenschutz or foerderprogramme or foerdermittel or tools or innovation or praxisbeispiele or moonshot_vision or eu_ai_act %}
-<div class="report-section">
-  <div class="chapter-box" style="box-shadow:none;">
-    <h2>Inhaltsverzeichnis</h2>
-    <ul>
-      {% if executive_summary %}<li>Executive Summary</li>{% endif %}
-      {% if summary_klein or summary_kmu or summary_solo %}<li>Kurzfazit</li>{% endif %}
-      {% if gesamtstrategie or roadmap %}<li>Gesamtstrategie & Roadmap</li>{% endif %}
-      {% if compliance or datenschutz %}<li>Compliance & Datenschutz</li>{% endif %}
-      {% if wants_funding and (websearch_links_foerder or foerderprogramme or foerdermittel) %}<li>Förderprogramme</li>{% endif %}
-      {% if tools or innovation %}<li>Tools & Innovationen</li>{% endif %}
-      {% if praxisbeispiele %}<li>Praxisbeispiele</li>{% endif %}
-      {% if moonshot_vision or eu_ai_act %}<li>Vision & Zukunftsausblick</li>{% endif %}
-      {% if checklisten %}<li>Checklisten & Leitfäden</li>{% endif %}
-    </ul>
-  </div>
-</div>
-{% endif %}
-
-<!-- EXECUTIVE SUMMARY -->
-{% if executive_summary %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>Executive Summary</h2>
-    {% if hauptleistung %}
-      <div class="hauptleistung-infobox">
-        <b>Im Fokus dieser Bewertung steht Ihre Hauptleistung:</b>
-        <span>{{ hauptleistung }}</span>
+<!-- ===== Footer (fixed, 2-zeilig) ===== -->
+<div class="footer small">
+  <div class="container foot">
+    <div class="foot-left">
+      <div>KI-Readiness • {{ company_name | Unternehmen }} • {{ assessment_date | Datum }}</div>
+      <div class="muted">
+        TÜV‑zertifiziertes KI‑Management • © {{ copyright_year | 2025 }} {{ copyright_owner | Wolf Hohl }} •
+        <span>kontakt@ki-sicherheit.jetzt</span>
       </div>
-    {% endif %}
-    <div>{{ executive_summary | safe }}</div>
-  </div>
-</div>
-{% endif %}
-
-<!-- INNOVATIONS-INTRO & GAMECHANGER-BLOCKS -->
-{% if branchen_innovations_intro or gamechanger_blocks %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box" style="background: #e6f4fe; border-left: 6px solid #2563eb;">
-    <h2 style="color: #184ea4;">Innovation, Trends & Gamechanger</h2>
-    {% if branchen_innovations_intro %}
-      <div style="font-size:1.09em; font-weight:500; color:#184ea4; margin-bottom:18px;">
-        {{ branchen_innovations_intro | safe }}
-      </div>
-    {% endif %}
-    {% if gamechanger_blocks %}
-      <div style="font-size:1.07em; color:#224266;">{{ gamechanger_blocks | safe }}</div>
-    {% endif %}
-  </div>
-</div>
-{% endif %}
-<!-- LIVE-WEBSEARCH: FÖRDERPROGRAMME -->
-{% if wants_funding and websearch_links_foerder %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box" style="background: #f9fbfd; border-left: 5px solid #57c7fa;">
-    <h2 style="color: #0e568a;">Tagesaktuelle Förderprogramme:</h2>
-    <div style="font-size:1.07em; color:#154e70; margin-bottom:0;">
-      {{ websearch_links_foerder | safe }}
     </div>
-    <div style="margin-top:10px; font-size:0.98em; color:#2279b6;">
-      <em>Quelle: Google-Suchergebnisse via SerpAPI, automatisch generiert am {{ datum }}.</em>
+    <div class="page-num"></div>
+  </div>
+</div>
+
+<div class="container">
+  <!-- ===== Header / Meta ===== -->
+  <div class="meta">
+    <div class="left">
+      <img class="logo" src="{{ logo_left }}" alt="" onerror="this.style.display='none'">
+      <div class="logo-fallback" style="display:none">KI-Sicherheit</div>
+      <script>if(!document.currentScript.previousElementSibling.getAttribute('src')){document.currentScript.previousElementSibling.nextElementSibling.style.display='inline-block'}</script>
+    </div>
+    <div class="left">
+      <img class="logo" src="{{ logo_right }}" alt="" onerror="this.style.display='none'">
     </div>
   </div>
-</div>
-{% endif %}
 
-<!-- LIVE-WEBSEARCH: KI-TOOLS -->
-{% if websearch_links_tools %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box" style="background: #f9fbfd; border-left: 5px solid #57c7fa;">
-    <h2 style="color: #0e568a;">Aktuelle KI-Tools & Software:</h2>
-    <div style="font-size:1.07em; color:#154e70; margin-bottom:0;">
-      {{ websearch_links_tools | safe }}
+  <!-- ===== Cover ===== -->
+  <section class="cover page-break avoid-break">
+    <div class="hero">
+      <div class="title">
+        <div class="kicker">Bewertung</div>
+        <h1>{{ report_title | KI-Readiness-Report }}</h1>
+        <p class="muted">Unternehmen: <b>{{ company_name | n/a }}</b> • Datum: <b>{{ assessment_date | n/a }}</b></p>
+        <div class="grid cover-cards">
+          <div class="card">
+            <div class="label">EU-AI / DSGVO</div>
+            <div class="value">Einschätzung: {{ compliance_band | solide Basis }}</div>
+          </div>
+          <div class="card">
+            <div class="label">Reifegrad (Selbsteinschätzung)</div>
+            <div class="value">{{ maturity_level | Fortgeschritten }}</div>
+          </div>
+          <div class="card">
+            <div class="label">Priorität</div>
+            <div class="value">{{ priority_focus | 90-Tage-Plan }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="score" style="--score: {{ score_percent | 0 }}">
+        <div class="inner">
+          <b>{{ score_percent | 0 }}%</b>
+          <span>Gesamtscore</span>
+        </div>
+      </div>
     </div>
-    <div style="margin-top:10px; font-size:0.98em; color:#2279b6;">
-      <em>Quelle: Google-Suchergebnisse via SerpAPI, automatisch generiert am {{ datum }}.</em>
+
+    <div class="grid cols-2">
+      <div class="box avoid-break">
+        <h3>Executive Summary</h3>
+        <div class="muted small">Kurzüberblick</div>
+        <div class="content">{{ exec_summary_html }}</div>
+      </div>
+      <div class="box avoid-break">
+        <h3>Top 5 Quick Wins</h3>
+        <div class="content">{{ quick_wins_html }}</div>
+      </div>
     </div>
-  </div>
-</div>
-{% endif %}
+    <div class="box avoid-break">
+      <h3>Hauptrisiken</h3>
+      <div class="content">{{ risks_html }}</div>
+    </div>
+  </section>
 
-
-<!-- KURZFAZIT -->
-{% if kurzfazit or summary_klein or summary_kmu or summary_solo %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>{% if lang == 'en' %}Brief summary{% else %}Kurzfazit{% endif %}</h2>
-    {% if hauptleistung %}
-      <div class="hauptleistung-infobox">
-        <b>{% if lang == 'en' %}Main service focus:{% else %}Fokus Hauptleistung:{% endif %}</b>
-        <span>{{ hauptleistung }}</span>
+  <!-- ===== Empfehlungen ===== -->
+  <section class="page-break avoid-break">
+    <h2>Empfehlungen & Roadmap (90 Tage)</h2>
+    <div class="grid cols-2">
+      <div class="box">
+        <h3>Konkrete Maßnahmen</h3>
+        <div>{{ recommendations_html }}</div>
       </div>
-    {% endif %}
-    {% if kurzfazit %}
-      <div>{{ kurzfazit | safe }}</div>
-    {% else %}
-      {% set size = unternehmensgroesse or company_size or '' %}
-      {% if size == 'solo' and summary_solo %}
-        <div><b>{% if lang == 'en' %}Solo entrepreneurs:{% else %}Solo‑Unternehmen:{% endif %}</b> {{ summary_solo | safe }}</div>
-      {% elif size == 'team' and summary_klein %}
-        <div><b>{% if lang == 'en' %}Small enterprises:{% else %}Kleine Unternehmen:{% endif %}</b> {{ summary_klein | safe }}</div>
-      {% elif size == 'kmu' and summary_kmu %}
-        <div><b>KMU:</b> {{ summary_kmu | safe }}</div>
-      {% else %}
-        {% if summary_solo %}<div><b>Solo‑Unternehmen:</b> {{ summary_solo | safe }}</div>{% endif %}
-      {% endif %}
-    {% endif %}
-  </div>
-</div>
-{% endif %}
-
-<!-- GESAMTSTRATEGIE & ROADMAP -->
-{% if gesamtstrategie or roadmap %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>Gesamtstrategie & Roadmap</h2>
-    {% if hauptleistung %}
-      <div class="hauptleistung-infobox">
-        <b>Fokus Hauptleistung:</b> <span>{{ hauptleistung }}</span>
+      <div class="box">
+        <h3>Roadmap</h3>
+        <div>{{ roadmap_html }}</div>
       </div>
-    {% endif %}
-    {% if gesamtstrategie %}
-      <div>{{ gesamtstrategie | safe }}</div>
-    {% endif %}
-    {% if roadmap %}
-      <div style="margin-top: 2em;">{{ roadmap | safe }}</div>
-    {% endif %}
-  </div>
-</div>
-{% endif %}
+    </div>
+  </section>
 
-<!-- COMPLIANCE & DATENSCHUTZ -->
-{% if compliance or datenschutz %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>Compliance & Datenschutz</h2>
-    {% if hauptleistung %}
-      <div class="hauptleistung-infobox">
-        <b>Fokus Hauptleistung:</b> <span>{{ hauptleistung }}</span>
-      </div>
-    {% endif %}
-    {% if compliance %}
-      <div>{{ compliance | safe }}</div>
-    {% endif %}
-    {% if datenschutz %}
-      <div style="margin-top: 2em;">{{ datenschutz | safe }}</div>
-    {% endif %}
-  </div>
-</div>
-{% endif %}
+  <!-- ===== Fachsektionen (vom Analyzer vorgerendert) ===== -->
+  <section class="page-break">
+    <h2>Detailanalyse</h2>
+    <div class="callout info avoid-break">
+      <b>Hinweis:</b> Die folgenden Abschnitte werden dynamisch aus der Analyse generiert.
+    </div>
+    <div class="section-stream">{{ sections_html }}</div>
+  </section>
 
-<!-- FÖRDERPROGRAMME -->
-{% if wants_funding and (foerderprogramme or foerdermittel) %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>Förderprogramme</h2>
-    {% if hauptleistung %}
-      <div class="hauptleistung-infobox">
-        <b>Fokus Hauptleistung:</b> <span>{{ hauptleistung }}</span>
-      </div>
-    {% endif %}
-    {% if foerderprogramme %}
-      <div>{{ foerderprogramme | safe }}</div>
-    {% endif %}
-    {% if foerdermittel %}
-      <div style="margin-top:1em;">{{ foerdermittel | safe }}</div>
-    {% endif %}
-  </div>
+  <!-- ===== Rechtlicher Hinweis ===== -->
+  <section class="page-break">
+    <h2>Hinweise & Haftung</h2>
+    <div class="small muted">
+      Diese Auswertung dient als Entscheidungshilfe. Sie ersetzt keine Rechts- oder Steuerberatung.
+      Angaben beruhen auf den im Fragebogen gemachten Informationen.
+    </div>
+  </section>
 </div>
-{% endif %}
-
-<!-- TOOLS & INNOVATIONEN -->
-{% if tools or innovation %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>Tools & Innovationen</h2>
-    {% if hauptleistung %}
-      <div class="hauptleistung-infobox">
-        <b>Fokus Hauptleistung:</b> <span>{{ hauptleistung }}</span>
-      </div>
-    {% endif %}
-    {% if tools %}
-      <div>{{ tools | safe }}</div>
-    {% endif %}
-    {% if innovation %}
-      <div style="margin-top:1.6em;">{{ innovation | safe }}</div>
-    {% endif %}
-  </div>
-</div>
-{% endif %}
-
-<!-- PRAXISBEISPIELE -->
-{% if praxisbeispiele %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>Praxisbeispiele</h2>
-    {% if hauptleistung %}
-      <div class="hauptleistung-infobox">
-        <b>Fokus Hauptleistung:</b> <span>{{ hauptleistung }}</span>
-      </div>
-    {% endif %}
-    <div>{{ praxisbeispiele | safe }}</div>
-  </div>
-</div>
-{% endif %}
-
-<!-- VISION & ZUKUNFTSAUSBLICK -->
-{% if moonshot_vision or eu_ai_act %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>Vision & Zukunftsausblick</h2>
-    {% if hauptleistung %}
-      <div class="hauptleistung-infobox">
-        <b>Fokus Hauptleistung:</b> <span>{{ hauptleistung }}</span>
-      </div>
-    {% endif %}
-    {% if moonshot_vision %}
-      <div>{{ moonshot_vision | safe }}</div>
-    {% endif %}
-    {% if eu_ai_act %}
-      <div style="margin-top:1.4em;"><b>EU AI Act:</b> {{ eu_ai_act | safe }}</div>
-    {% endif %}
-  </div>
-</div>
-{% endif %}
-
-<!-- CHECKLISTEN & LEITFÄDEN -->
-{% if checklisten %}
-<div class="report-section" style="page-break-before: always;">
-  <div class="chapter-box">
-    <h2>Checklisten & Leitfäden</h2>
-    <div>{{ checklisten | safe }}</div>
-  </div>
-</div>
-{% endif %}
-
 </body>
 </html>
