@@ -1,4 +1,4 @@
-// index.js – robust: Chrome-Pfad-Erkennung, Mail tolerant, Status-Header
+// index.js – PDF-Service (robust, mit Pfad-Sanitizer & Mail-Status-Headern)
 import express from "express";
 import cors from "cors";
 import nodemailer from "nodemailer";
@@ -11,65 +11,98 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 app.use(bodyParser.json({ limit: process.env.JSON_LIMIT || "10mb" }));
-app.use(bodyParser.text({ type: ["text/*", "application/xhtml+xml"], limit: process.env.HTML_LIMIT || "10mb" }));
+app.use(
+  bodyParser.text({
+    type: ["text/*", "application/xhtml+xml"],
+    limit: process.env.HTML_LIMIT || "10mb",
+  })
+);
 app.use(cors({ origin: "*" }));
 
-app.get("/health", (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
-
-// Hilfsroute: zeigt, welchen Browserpfad wir nutzen
-app.get("/env", (req, res) => {
-  const fallbacks = ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
-  const exists = fallbacks.filter(p => fs.existsSync(p));
-  let exec = null;
-  try { exec = puppeteer.executablePath(); } catch {}
-  res.json({
-    ok: true,
-    puppeteerExecutablePath: exec || null,
-    envExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH || null,
-    fallbacksExisting: exists
-  });
-});
+// --- kleine Hilfsfunktionen ---------------------------------------------------
 
 function makeTransport() {
   const secure = String(process.env.SMTP_SECURE || "true").toLowerCase() === "true";
   const port = parseInt(process.env.SMTP_PORT || (secure ? "465" : "587"), 10);
+
   if (!process.env.SMTP_HOST) {
+    // Kein SMTP konfiguriert -> Stub, der "schluckt"
     return { sendMail: async () => ({ accepted: [], rejected: ["(skipped: SMTP_HOST not set)"] }) };
   }
+
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port, secure,
-    auth: (process.env.SMTP_USER && process.env.SMTP_PASS) ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+    port,
+    secure,
+    auth:
+      process.env.SMTP_USER && process.env.SMTP_PASS
+        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+        : undefined,
     logger: process.env.SMTP_DEBUG === "true",
     debug: process.env.SMTP_DEBUG === "true",
   });
 }
 
+// Entfernt **ungültige** Browser-Pfade aus der ENV – sonst erzwingt Puppeteer
+// einen kaputten Pfad und crasht.
+function sanitizePuppeteerEnv() {
+  const removed = [];
+  for (const key of ["PUPPETEER_EXECUTABLE_PATH", "CHROME_PATH"]) {
+    const p = process.env[key];
+    if (p && !fs.existsSync(p)) {
+      removed.push({ [key]: p });
+      delete process.env[key];
+    }
+  }
+  if (removed.length) {
+    console.warn("[PDFSERVICE] removed invalid exec paths from env:", removed);
+  }
+}
+
+// Ermittelt einen ausführbaren Chrome/Chromium-Pfad.
 async function resolveChromePath() {
+  // 1) ENV (wenn vorhanden & gültig)
   const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH;
   if (envPath && fs.existsSync(envPath)) return envPath;
 
+  // 2) Puppeteer-Default (im Base-Image vorhanden)
   try {
     const p = puppeteer.executablePath();
     if (p && fs.existsSync(p)) return p;
-  } catch {}
+  } catch {
+    /* noop */
+  }
 
-  const fallbacks = ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
-  for (const p of fallbacks) if (fs.existsSync(p)) return p;
+  // 3) Fallback-Pfade
+  const fallbacks = [
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+  ];
+  for (const p of fallbacks) {
+    if (fs.existsSync(p)) return p;
+  }
 
-  return null; // puppeteer versucht dann selbst, was bei SKIP_DOWNLOAD meist fehlschlägt
+  // 4) Nichts gefunden -> Puppeteer versucht „auto“ (meist fehlschlagend, wenn Skip Download)
+  return null;
 }
 
 async function renderPdf(html) {
+  sanitizePuppeteerEnv();
   const execPath = await resolveChromePath();
+
   const launchOpts = {
     headless: "new",
     args: [
-      "--no-sandbox", "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage", "--disable-accelerated-2d-canvas",
-      "--disable-gpu", "--disable-web-security"
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--disable-gpu",
+      "--disable-web-security",
     ],
-    protocolTimeout: 120000
+    protocolTimeout: 120000,
   };
   if (execPath) launchOpts.executablePath = execPath;
 
@@ -78,21 +111,55 @@ async function renderPdf(html) {
   const browser = await puppeteer.launch(launchOpts);
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
-  const pdf = await page.pdf({ format: "A4", printBackground: true, margin: { top: "12mm", right: "12mm", bottom: "16mm", left: "12mm" } });
+  const pdf = await page.pdf({
+    format: "A4",
+    printBackground: true,
+    margin: { top: "12mm", right: "12mm", bottom: "16mm", left: "12mm" },
+  });
   await browser.close();
   return pdf;
 }
 
+// --- Routen --------------------------------------------------------------------
+
+app.get("/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+
+// Diagnose: zeig gefundene Pfade an
+app.get("/env", (_req, res) => {
+  const fallbacks = [
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+  ];
+  const exists = fallbacks.filter((p) => fs.existsSync(p));
+  let exec = null;
+  try {
+    exec = puppeteer.executablePath();
+  } catch {
+    exec = null;
+  }
+  res.json({
+    ok: true,
+    puppeteerExecutablePath: exec || null,
+    envExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH || null,
+    fallbacksExisting: exists,
+  });
+});
+
 app.post("/generate-pdf", async (req, res) => {
   const rid = req.get("X-Request-ID") || crypto.randomUUID();
   const emailEnabled = String(process.env.EMAIL_ENABLED || "true").toLowerCase() !== "false";
-  const emailStrict  = String(process.env.EMAIL_STRICT  || "false").toLowerCase() === "true";
+  const emailStrict = String(process.env.EMAIL_STRICT || "false").toLowerCase() === "true";
 
   const adminEmail = process.env.ADMIN_EMAIL || "";
   let userEmail = req.get("X-User-Email") || "";
 
+  // Input akzeptieren als text/html **oder** JSON { html, to }
   let html = "";
-  if (typeof req.body === "string" && (req.headers["content-type"] || "").startsWith("text/")) {
+  const ctype = (req.headers["content-type"] || "").toLowerCase();
+
+  if (typeof req.body === "string" && ctype.startsWith("text/")) {
     html = req.body;
   } else if (req.is("application/json")) {
     const { html: h, to } = req.body || {};
@@ -101,7 +168,10 @@ app.post("/generate-pdf", async (req, res) => {
   } else {
     return res.status(415).json({ ok: false, error: "Unsupported Content-Type" });
   }
-  if (!html || html.length < 20) return res.status(400).json({ ok: false, error: "Empty html" });
+
+  if (!html || html.length < 20) {
+    return res.status(400).json({ ok: false, error: "Empty html" });
+  }
 
   console.log("[PDFSERVICE] Render start", { rid, len: html.length, userEmail });
 
@@ -114,39 +184,70 @@ app.post("/generate-pdf", async (req, res) => {
     return res.status(500).json({ ok: false, error: String(e) });
   }
 
-  let adminStatus = "skip", userStatus = "skip";
+  // Mails (best-effort, kein 500 außer EMAIL_STRICT=true)
+  let adminStatus = "skip",
+    userStatus = "skip";
   if (emailEnabled) {
     try {
       const transporter = makeTransport();
-      const from = process.env.SMTP_FROM || (process.env.SMTP_USER || "pdf@localhost");
+      const from = process.env.SMTP_FROM || process.env.SMTP_USER || "pdf@localhost";
       const replyTo = process.env.SMTP_REPLY_TO || undefined;
 
       const tasks = [];
       if (adminEmail) {
-        tasks.push(transporter.sendMail({
-          from, replyTo, to: adminEmail,
-          subject: "KI-Readiness Report erzeugt",
-          text: `Ein neuer Report wurde erstellt. RID=${rid}`,
-          attachments: [{ filename: "KI-Readiness-Report.pdf", content: pdfBuffer }],
-        }).then(()=>{ adminStatus="ok"; console.log("[PDFSERVICE] Admin-Mail ok:", adminEmail); })
-          .catch(err=>{ adminStatus="fail"; console.error("[PDFSERVICE] Admin-Mail Fehler:", err?.message||err); }));
+        tasks.push(
+          transporter
+            .sendMail({
+              from,
+              replyTo,
+              to: adminEmail,
+              subject: "KI-Readiness Report erzeugt",
+              text: `Ein neuer Report wurde erstellt. RID=${rid}`,
+              attachments: [{ filename: "KI-Readiness-Report.pdf", content: pdfBuffer }],
+            })
+            .then(() => {
+              adminStatus = "ok";
+              console.log("[PDFSERVICE] Admin-Mail ok:", adminEmail);
+            })
+            .catch((err) => {
+              adminStatus = "fail";
+              console.error("[PDFSERVICE] Admin-Mail Fehler:", err?.message || err);
+            })
+        );
       }
+
       if (userEmail) {
-        tasks.push(transporter.sendMail({
-          from, replyTo, to: userEmail,
-          subject: "Ihr KI-Readiness-Report",
-          text: "Vielen Dank. Anbei Ihr individueller KI-Readiness-Report.",
-          attachments: [{ filename: "KI-Readiness-Report.pdf", content: pdfBuffer }],
-        }).then(()=>{ userStatus="ok"; console.log("[PDFSERVICE] Nutzer-Mail ok:", userEmail); })
-          .catch(err=>{ userStatus="fail"; console.error("[PDFSERVICE] Nutzer-Mail Fehler:", err?.message||err); }));
+        tasks.push(
+          transporter
+            .sendMail({
+              from,
+              replyTo,
+              to: userEmail,
+              subject: "Ihr KI-Readiness-Report",
+              text: "Vielen Dank. Anbei Ihr individueller KI-Readiness-Report.",
+              attachments: [{ filename: "KI-Readiness-Report.pdf", content: pdfBuffer }],
+            })
+            .then(() => {
+              userStatus = "ok";
+              console.log("[PDFSERVICE] Nutzer-Mail ok:", userEmail);
+            })
+            .catch((err) => {
+              userStatus = "fail";
+              console.error("[PDFSERVICE] Nutzer-Mail Fehler:", err?.message || err);
+            })
+        );
       }
+
       await Promise.allSettled(tasks);
     } catch (e) {
-      console.error("[PDFSERVICE] sendMail setup error:", e?.message||e);
-      if (emailStrict) return res.status(502).json({ ok:false, error:"Email send failed", admin:adminStatus, user:userStatus });
+      console.error("[PDFSERVICE] sendMail setup error:", e?.message || e);
+      if (emailStrict) {
+        return res.status(502).json({ ok: false, error: "Email send failed", admin: adminStatus, user: userStatus });
+      }
     }
   }
 
+  // Immer PDF liefern – Mail-Status in Headern
   res.setHeader("X-Email-Admin", adminStatus);
   res.setHeader("X-Email-User", userStatus);
   res.setHeader("Content-Type", "application/pdf");
