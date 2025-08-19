@@ -1,184 +1,104 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ report_title | AI Readiness Report }}</title>
-<style>
-:root{
-  --ink:#0b1220; --muted:#6b7787; --bg:#ffffff;
-  --brand:#2a7bff; --ok:#16a34a; --warn:#d97706; --err:#dc2626; --info:#0ea5e9;
-  --line:#e6e9ee; --chip:#f3f6fb;
-}
-*{box-sizing:border-box}
-html,body{margin:0;padding:0;color:var(--ink);background:var(--bg);-webkit-print-color-adjust:exact;print-color-adjust:exact}
-body{font: 12.5pt/1.45 "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;}
-.container{max-width:960px;margin:0 auto;padding:24px 28px 88px}
-h1,h2,h3{margin:0 0 10px 0;line-height:1.2}
-h1{font-size:28pt}
-h2{font-size:18pt;margin-top:18px;border-bottom:1px solid var(--line);padding-bottom:6px}
-h3{font-size:13.5pt;margin-top:12px}
-p,li{color:var(--ink)}
-p.muted, .muted{color:var(--muted)}
-hr{border:none;border-top:1px solid var(--line);margin:18px 0}
-.small{font-size:10pt}
-.badge{display:inline-flex;align-items:center;gap:6px;background:var(--chip);color:var(--ink);border:1px solid var(--line);padding:6px 10px;border-radius:999px;font-size:10pt}
-.grid{display:grid;gap:16px}
-.cols-2{grid-template-columns:1fr 1fr}
-.box{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff}
-.kicker{letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-size:10pt}
-.meta{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.meta .left{display:flex;gap:12px;align-items:center}
-.logo{height:40px;max-width:160px;object-fit:contain}
-img.logo:where([src=""], [src="undefined"], [src="null"]){display:none}
-.logo-fallback{font-weight:600;font-size:14pt;letter-spacing:.02em;background:var(--chip);border:1px solid var(--line);padding:6px 10px;border-radius:10px}
-
-/* Score Ring */
-.score{--p: calc(1*var(--score, 0)); position:relative;width:160px;height:160px;border-radius:50%;
-  background:conic-gradient(var(--brand) calc(var(--p)*1%), #e8edf5 0);
-  display:grid;place-items:center;margin:auto}
-.score > .inner{width:124px;height:124px;border-radius:50%;background:#fff;border:1px solid var(--line);display:grid;place-items:center;text-align:center;padding:8px}
-.score b{font-size:22pt}
-.score span{font-size:10pt;color:var(--muted)}
-
-/* Cover */
-.cover{display:grid;gap:18px;margin-top:24px}
-.cover .hero{display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:center}
-.hero .title{padding:6px 0}
-.cover-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.card{background:linear-gradient(180deg,#fff, #f9fbff);border:1px solid var(--line);padding:12px;border-radius:12px}
-.card .label{font-size:10pt;color:var(--muted)}
-.card .value{font-size:14pt;font-weight:600}
-
-/* Footer */
-.footer{position:fixed;bottom:0;left:0;right:0;border-top:1px solid var(--line);background:#fff}
-.footer .container{padding:8px 28px;display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
-.footer .foot-left{display:flex;flex-direction:column;gap:2px;max-width:80%}
-.page-num:after{counter-increment: page; content: "Page " counter(page)}
-
-/* Page breaks */
-.page-break{break-after:page}
-.avoid-break{break-inside:avoid}
-
-/* Lists */
-ul.clean{margin:8px 0 0 18px}
-ul.clean>li{margin:4px 0}
-
-/* Callouts */
-.callout{border-left:4px solid var(--brand);background:linear-gradient(180deg,#ffffff,#f7fbff);padding:12px;border-radius:8px;border:1px solid var(--line)}
-.callout.ok{border-left-color:var(--ok)}
-.callout.warn{border-left-color:var(--warn)}
-.callout.err{border-left-color:var(--err)}
-</style>
+  <meta charset="utf-8" />
+  <title>AI Readiness Report</title>
+  <style>
+    @page { size: A4; margin: 14mm 12mm 18mm 12mm; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Liberation Sans", sans-serif; color:#111; line-height:1.45; }
+    h1,h2,h3 { margin: 0.4em 0 0.3em; }
+    h1 { font-size: 26px; letter-spacing: 0.2px; }
+    h2 { font-size: 20px; border-bottom: 2px solid #eee; padding-bottom: 6px; margin-top: 18px; }
+    h3 { font-size: 16px; margin-top: 12px; }
+    p, li { font-size: 12.5px; }
+    ul, ol { margin: 0.2em 0 0.6em 1.25em; }
+    .muted { color:#666; }
+    .brand { color: {{ brand_color|default("#0b6cff") }}; }
+    .page { page-break-inside: avoid; }
+    .grid { display:flex; gap:16px; }
+    .col { flex:1; }
+    .box { border:1px solid #e7e7e7; border-radius:10px; padding:12px; }
+    .hero { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:10px; }
+    .logos { display:flex; align-items:center; gap:10px; }
+    .logos img { max-height:38px; }
+    .score { text-align:right; }
+    .score-badge { display:inline-block; min-width:88px; padding:8px 12px; border-radius:999px; background: #f5f7ff; border:1px solid #dfe6ff; font-weight:600; }
+    .footer { position: fixed; bottom: 6mm; left: 12mm; right: 12mm; font-size: 10px; color:#666; border-top:1px solid #eee; padding-top:4px; }
+    .small { font-size: 11px; }
+    .waterline { height: 2px; background: {{ brand_color|default("#0b6cff") }}; margin: 10px 0 0 0; opacity: 0.5;}
+    .badge { display:inline-block; background:#eef5ff; border:1px solid #dbe8ff; color:#19407c; font-size:11px; padding:2px 8px; border-radius:999px; }
+    .callout { background:#fffdf5; border:1px solid #f2e9c3; border-left:4px solid #e1c542; padding:10px; border-radius:8px; }
+    .spacer { height:12px; }
+    .mb8 { margin-bottom:8px; }
+  </style>
 </head>
 <body>
 
-<!-- ===== Footer (fixed, 2 lines) ===== -->
-<div class="footer small">
-  <div class="container foot">
-    <div class="foot-left">
-      <div>AI Readiness • {{ company_name | Company }} • {{ assessment_date | Date }}</div>
-      <div class="muted">
-        TÜV‑certified AI Management • © {{ copyright_year | 2025 }} {{ copyright_owner | Wolf Hohl }} •
-        <span>kontakt@ki-sicherheit.jetzt</span>
-      </div>
-    </div>
-    <div class="page-num"></div>
-  </div>
-</div>
-
-<div class="container">
-  <!-- ===== Header / Meta ===== -->
-  <div class="meta">
-    <div class="left">
-      <img class="logo" src="{{ logo_left }}" alt="" onerror="this.style.display='none'">
-      <div class="logo-fallback" style="display:none">AI Readiness</div>
-      <script>if(!document.currentScript.previousElementSibling.getAttribute('src')){document.currentScript.previousElementSibling.nextElementSibling.style.display='inline-block'}</script>
-    </div>
-    <div class="left">
-      <img class="logo" src="{{ logo_right }}" alt="" onerror="this.style.display='none'">
-    </div>
+  <!-- fixed footer on every page -->
+  <div class="footer">
+    TÜV-certified AI Management © {{ copyright_year }}: {{ copyright_owner }} ·
+    Email: {{ contact_email|default("kontakt@ki-sicherheit.jetzt") }}
   </div>
 
-  <!-- ===== Cover ===== -->
-  <section class="cover page-break avoid-break">
-    <div class="hero">
-      <div class="title">
-        <div class="kicker">Assessment</div>
-        <h1>{{ report_title | AI Readiness Report }}</h1>
-        <p class="muted">Company: <b>{{ company_name | n/a }}</b> • Date: <b>{{ assessment_date | n/a }}</b></p>
-        <div class="grid cover-cards">
-          <div class="card">
-            <div class="label">EU-AI / GDPR</div>
-            <div class="value">Assessment: {{ compliance_band | solid baseline }}</div>
-          </div>
-          <div class="card">
-            <div class="label">Maturity (self-rating)</div>
-            <div class="value">{{ maturity_level | advanced }}</div>
-          </div>
-          <div class="card">
-            <div class="label">Priority</div>
-            <div class="value">{{ priority_focus | 90-day plan }}</div>
-          </div>
-        </div>
-      </div>
-      <div class="score" style="--score: {{ score_percent | 0 }}">
-        <div class="inner">
-          <b>{{ score_percent | 0 }}%</b>
-          <span>Total score</span>
-        </div>
-      </div>
+  <!-- header -->
+  <div class="hero">
+    <div class="logos">
+      {% if logo_left_url %}<img src="{{ logo_left_url }}" alt="Logo" />{% endif %}
+      {% if logo_right_url %}<img src="{{ logo_right_url }}" alt="Logo 2" />{% endif %}
     </div>
+    <div class="score">
+      <div class="score-badge">Score: <span class="brand">{{ score_percent|default(0) }}%</span></div><br/>
+      <span class="small muted">Generated: {{ generated_on|default(assessment_date) }}</span>
+    </div>
+  </div>
+  <div class="waterline"></div>
 
-    <div class="grid cols-2">
-      <div class="box avoid-break">
-        <h3>Executive Summary</h3>
-        <div class="muted small">At a glance</div>
-        <div class="content">{{ exec_summary_html }}</div>
-      </div>
-      <div class="box avoid-break">
-        <h3>Top 5 Quick Wins</h3>
-        <div class="content">{{ quick_wins_html }}</div>
-      </div>
-    </div>
-    <div class="box avoid-break">
-      <h3>Key Risks</h3>
-      <div class="content">{{ risks_html }}</div>
-    </div>
-  </section>
+  <h1>AI Readiness Report</h1>
+  <p class="muted small">Sector: {{ branche|default("general") }} {% if is_self_employed %} · <span class="badge">Solo self-employed</span>{% endif %}</p>
 
-  <!-- ===== Recommendations ===== -->
-  <section class="page-break avoid-break">
-    <h2>Recommendations & 90-day Roadmap</h2>
-    <div class="grid cols-2">
-      <div class="box">
-        <h3>Actionable Steps</h3>
-        <div>{{ recommendations_html }}</div>
+  <!-- preface -->
+  <div class="box page">
+    {{ preface|safe }}
+  </div>
+
+  <!-- Executive + Quick Wins / Risks -->
+  <div class="grid page">
+    <div class="col box">
+      <h2>Executive Summary</h2>
+      {{ exec_summary_html|safe }}
+    </div>
+    <div class="col">
+      <div class="box mb8">
+        <h2>Quick Wins</h2>
+        {{ quick_wins_html|safe }}
       </div>
       <div class="box">
-        <h3>Roadmap</h3>
-        <div>{{ roadmap_html }}</div>
+        <h2>Key Risks</h2>
+        {{ risks_html|safe }}
       </div>
     </div>
-  </section>
+  </div>
 
-  <!-- ===== Sections (pre-rendered) ===== -->
-  <section class="page-break">
-    <h2>Detailed Analysis</h2>
-    <div class="callout info avoid-break">
-      <b>Note:</b> The following sections are dynamically generated by the analyzer.
+  <!-- Recommendations -->
+  <div class="page box">
+    <h2>Top Recommendations</h2>
+    {{ recommendations_html|safe }}
+    <div class="callout small">
+      Note: Items are prioritised by impact and feasibility. Start with the first 1–2 items and review weekly.
     </div>
-    <div class="section-stream">{{ sections_html }}</div>
-  </section>
+  </div>
 
-  <!-- ===== Legal ===== -->
-  <section class="page-break">
-    <h2>Notice & Disclaimer</h2>
-    <div class="small muted">
-      This report is decision support and not legal or tax advice.
-      It relies on the information provided in the questionnaire.
-    </div>
-  </section>
-</div>
+  <!-- Roadmap -->
+  <div class="page box">
+    <h2>Roadmap (90 days)</h2>
+    {{ roadmap_html|safe }}
+  </div>
+
+  <!-- Other sections -->
+  <div class="page">
+    {{ sections_html|safe }}
+  </div>
+
 </body>
 </html>
