@@ -1,4 +1,4 @@
-// index.js — PDF-Service (Gold-Standard, hardened SMTP + SendGrid fallback)
+// index.js — PDF-Service (Gold-Standard, async mail + hardened SMTP)
 import express from "express";
 import cors from "cors";
 import nodemailer from "nodemailer";
@@ -15,7 +15,7 @@ app.use(bodyParser.json({ limit: process.env.JSON_LIMIT || "10mb" }));
 app.use(bodyParser.text({ type: ["text/*", "application/xhtml+xml"], limit: process.env.HTML_LIMIT || "10mb" }));
 app.use(cors({ origin: "*" }));
 
-// ------------------------- SMTP Helpers -----------------------------
+// ------------------------- Helpers -------------------------
 function _bool(env, def = false) {
   const v = String(env ?? "").trim().toLowerCase();
   if (v === "true") return true;
@@ -23,17 +23,15 @@ function _bool(env, def = false) {
   return def;
 }
 
+// ------------------------- SMTP -----------------------------
 function makeTransport({ alternate = false } = {}) {
-  // Primärkonfiguration aus ENV
   const wantSecure = _bool(process.env.SMTP_SECURE, true);
   const wantPort = parseInt(process.env.SMTP_PORT || (wantSecure ? "465" : "587"), 10);
 
-  // Fallback-Konfiguration: Port/Secure invertieren
   const secure = alternate ? !wantSecure : wantSecure;
   const port = alternate ? (wantSecure ? 587 : 465) : wantPort;
 
   if (!process.env.SMTP_HOST) {
-    // Kein SMTP: Stub-Transport
     return {
       __stub: true,
       sendMail: async () => ({ accepted: [], rejected: ["(skipped: SMTP_HOST not set)"] }),
@@ -75,23 +73,8 @@ async function verifySmtp(transporter) {
 
 async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readiness-Report.pdf" }) {
   const emailEnabled = !_bool(process.env.EMAIL_ENABLED, true) ? false : true;
-
-  let meta = {
-    admin: "skip",
-    user: "skip",
-    engine: "smtp",
-    attempt: 0,
-    alternateTried: false,
-  };
-
+  let meta = { admin: "skip", user: "skip", engine: "smtp", attempt: 0, alternateTried: false };
   if (!emailEnabled) return meta;
-
-  // 1) SMTP Primär
-  let transporter = makeTransport();
-  let v = await verifySmtp(transporter);
-  if (!v.ok) {
-    console.error("[PDFSERVICE] SMTP verify failed:", v);
-  }
 
   const from = process.env.SMTP_FROM || process.env.SMTP_USER || "pdf@localhost";
   const replyTo = process.env.SMTP_REPLY_TO || undefined;
@@ -101,113 +84,96 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
     const tasks = [];
     if (adminEmail) {
       tasks.push(
-        t
-          .sendMail({
-            from, replyTo, to: adminEmail,
-            subject: "KI-Readiness Report erzeugt",
-            text: "Neuer Report wurde erstellt.",
-            attachments: [{ filename, content: pdfBuffer, contentType: "application/pdf" }],
-          })
-          .then(() => (meta.admin = "ok"))
-          .catch((err) => {
-            meta.admin = "fail";
-            throw err;
-          })
+        t.sendMail({
+          from, replyTo, to: adminEmail,
+          subject: "KI-Readiness Report erzeugt",
+          text: "Neuer Report wurde erstellt.",
+          attachments: [{ filename, content: pdfBuffer, contentType: "application/pdf" }],
+        }).then(() => (meta.admin = "ok"))
+         .catch((err) => { meta.admin = "fail"; throw err; })
       );
     }
     if (to) {
       tasks.push(
-        t
-          .sendMail({
-            from, replyTo, to,
-            subject,
-            text,
-            attachments: [{ filename, content: pdfBuffer, contentType: "application/pdf" }],
-          })
-          .then(() => (meta.user = "ok"))
-          .catch((err) => {
-            meta.user = "fail";
-            throw err;
-          })
+        t.sendMail({
+          from, replyTo, to,
+          subject,
+          text,
+          attachments: [{ filename, content: pdfBuffer, contentType: "application/pdf" }],
+        }).then(() => (meta.user = "ok"))
+         .catch((err) => { meta.user = "fail"; throw err; })
       );
     }
     await Promise.all(tasks.map(p => p.catch(e => { throw e; })));
   }
 
+  // 1) Primär
   try {
     meta.attempt = 1;
-    await _trySend(transporter);
+    const t1 = makeTransport();
+    const v = await verifySmtp(t1);
+    if (!v.ok) console.error("[PDFSERVICE] SMTP verify failed:", v);
+    await _trySend(t1);
     return meta;
-  } catch (err) {
-    console.error("[PDFSERVICE] SMTP primary error:", err?.message || err);
+  } catch (e) {
+    console.error("[PDFSERVICE] SMTP primary error:", e?.message || e);
   }
 
-  // 2) SMTP Alternate (invertiere Port/secure), wenn erlaubt
+  // 2) Alternate (465⇄587 / secure invertiert)
   if (_bool(process.env.SMTP_TRY_ALTERNATE, true)) {
     try {
-      meta.engine = "smtp";
       meta.attempt = 2;
       meta.alternateTried = true;
-      const alt = makeTransport({ alternate: true });
-      const v2 = await verifySmtp(alt);
+      const t2 = makeTransport({ alternate: true });
+      const v2 = await verifySmtp(t2);
       if (!v2.ok) console.error("[PDFSERVICE] SMTP alternate verify failed:", v2);
-      await _trySend(alt);
+      await _trySend(t2);
       return meta;
-    } catch (err2) {
-      console.error("[PDFSERVICE] SMTP alternate error:", err2?.message || err2);
+    } catch (e2) {
+      console.error("[PDFSERVICE] SMTP alternate error:", e2?.message || e2);
     }
   }
 
-  // 3) SendGrid-Fallback (falls API-Key vorhanden)
+  // 3) SendGrid-Fallback
   if (process.env.SENDGRID_API_KEY) {
     try {
       meta.engine = "sendgrid";
       meta.attempt = meta.attempt ? meta.attempt + 1 : 1;
-      const ok = await sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filename });
+      const ok = await sendViaSendgrid({ to, subject, text, pdfBuffer, filename, adminEmail: process.env.ADMIN_EMAIL || "" });
       if (ok) {
-        if (adminEmail) meta.admin = "ok";
+        if (process.env.ADMIN_EMAIL) meta.admin = "ok";
         if (to) meta.user = "ok";
         return meta;
       }
-    } catch (e) {
-      console.error("[PDFSERVICE] SendGrid error:", e?.message || e);
+    } catch (e3) {
+      console.error("[PDFSERVICE] SendGrid error:", e3?.message || e3);
     }
   }
 
-  // 4) Am Ende Status zurück (Mail ggf. fail/skip); PDF wurde trotzdem erzeugt
-  return meta;
+  return meta; // PDF ist trotzdem generiert
 }
 
 async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filename }) {
   const key = process.env.SENDGRID_API_KEY;
+  if (!key) return false;
   const from = process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || "pdf@localhost";
+
   const personalizations = [];
   if (adminEmail) personalizations.push({ to: [{ email: adminEmail }] });
   if (to) personalizations.push({ to: [{ email: to }] });
-
-  if (!personalizations.length) return true; // nichts zu senden
+  if (!personalizations.length) return true;
 
   const payload = {
     personalizations,
     from: { email: from },
     subject,
     content: [{ type: "text/plain", value: text || "Ihr Report ist angehängt." }],
-    attachments: [
-      {
-        content: pdfBuffer.toString("base64"),
-        filename,
-        type: "application/pdf",
-        disposition: "attachment",
-      },
-    ],
+    attachments: [{ content: pdfBuffer.toString("base64"), filename, type: "application/pdf", disposition: "attachment" }],
   };
 
   const resp = await fetch("https://api.sendgrid.com/v3/mail/send", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (resp.status === 202) return true;
@@ -272,7 +238,7 @@ async function renderPdf(html) {
   }
 }
 
-// ------------------------- Routes ----------------------------------
+// ------------------------- Diagnose -------------------------------
 app.get("/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
 app.get("/env", (_req, res) => {
@@ -282,7 +248,6 @@ app.get("/env", (_req, res) => {
   res.json({ ok: true, puppeteerExecutablePath: exec || null, envExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH || null, fallbacksExisting: fallbacks });
 });
 
-// SMTP Diagnose
 app.get("/smtp/verify", async (_req, res) => {
   const t = makeTransport();
   const v = await verifySmtp(t);
@@ -295,15 +260,16 @@ app.get("/smtp/config", (_req, res) => {
   res.json({ primary: t1.__info || {}, alternate: t2.__info || {}, sendgrid: !!process.env.SENDGRID_API_KEY });
 });
 
+// ------------------------- Core Route ------------------------------
 app.post("/generate-pdf", async (req, res) => {
   const rid = req.get("X-Request-ID") || crypto.randomUUID();
-  const emailEnabled = !_bool(process.env.EMAIL_ENABLED, true) ? false : true;
+  const wantAsyncMail = (String(process.env.EMAIL_ASYNC || "true").toLowerCase() !== "false");
 
   let userEmail = req.get("X-User-Email") || "";
   let subject = req.get("X-Subject") || process.env.SUBJECT || "Ihr KI-Readiness-Report";
   const reqLang = (req.get("X-Lang") || "").toLowerCase();
 
-  // Input Body
+  // Body lesen
   let html = "";
   const ctype = String(req.headers["content-type"] || "").toLowerCase();
   if (typeof req.body === "string" && ctype.startsWith("text/")) {
@@ -330,23 +296,44 @@ app.post("/generate-pdf", async (req, res) => {
     return res.status(500).json({ ok: false, error: String(e) });
   }
 
-  // Mails (robust, mit Alternate/SendGrid-Fallback)
-  let mailMeta = { admin: "skip", user: "skip" };
-  if (emailEnabled) {
-    try {
-      const txt = reqLang === "en"
-        ? "Thank you. Your individual AI Readiness report is attached."
-        : "Vielen Dank. Anbei Ihr individueller KI-Readiness-Report.";
-      mailMeta = await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Readiness-Report.pdf" });
-    } catch (e) {
-      console.error("[PDFSERVICE] mail pipeline error:", e?.message || e);
-    }
+  // --- ASYNC MAIL: PDF sofort senden, Mail im Hintergrund ---
+  const txt = reqLang === "en"
+    ? "Thank you. Your individual AI Readiness report is attached."
+    : "Vielen Dank. Anbei Ihr individueller KI-Readiness-Report.";
+
+  res.setHeader("X-Mail-Mode", wantAsyncMail ? "async" : "sync");
+  res.setHeader("X-Mail-Engine", process.env.SENDGRID_API_KEY ? "sendgrid-or-smtp" : "smtp");
+
+  if (wantAsyncMail) {
+    res.setHeader("X-Email-Admin", "queued");
+    res.setHeader("X-Email-User", userEmail ? "queued" : "skip");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline; filename=KI-Readiness-Report.pdf");
+    // Antwort JETZT senden
+    res.status(200).send(pdfBuffer);
+
+    // Mailversand „fire-and-forget“
+    setTimeout(async () => {
+      try {
+        await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Readiness-Report.pdf" });
+      } catch (e) {
+        console.error("[PDFSERVICE] async mail error:", e?.message || e);
+      }
+    }, 10);
+
+    return; // Route ist fertig
   }
 
-  // Response: PDF + Mail-Status
+  // --- SYNC MAIL (nur wenn EMAIL_ASYNC=false explizit gesetzt) ---
+  let mailMeta = { admin: "skip", user: "skip" };
+  try {
+    mailMeta = await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Readiness-Report.pdf" });
+  } catch (e) {
+    console.error("[PDFSERVICE] mail pipeline error:", e?.message || e);
+  }
+
   res.setHeader("X-Email-Admin", mailMeta.admin || "skip");
   res.setHeader("X-Email-User", mailMeta.user || "skip");
-  res.setHeader("X-Mail-Engine", mailMeta.engine || "smtp");
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", "inline; filename=KI-Readiness-Report.pdf");
   return res.status(200).send(pdfBuffer);
