@@ -45,6 +45,14 @@
       .footer{color:#a8b3c4;border-top-color:#1e2a45}
       a{color:#7fb3ff;border-bottom-color:rgba(127,179,255,.4)}
     }
+/* TOC & Vision */
+.toc-card{background:var(--card);border:1px dashed var(--border);border-radius:14px;padding:14px}
+.toc-card ul{margin:.3rem 0 .2rem 1rem}
+.toc-card li{margin:.15rem 0}
+.vision-card{background:linear-gradient(180deg, rgba(24,169,153,.08), rgba(31,102,255,.08));
+  border:1px solid rgba(31,102,255,.25); border-left:4px solid var(--brand-blue);
+  border-radius:12px; padding:14px; }
+
   </style>
 </head>
 <body>
@@ -73,6 +81,12 @@
       <p><b>Main service/product:</b> {{ hauptleistung or "-" }}</p>
     </div>
     {% endif %}
+{% if toc_html %}
+  <div class="card toc-card">
+    <h2>Table of contents</h2>
+    {{ toc_html|safe }}
+  </div>
+{% endif %}
 
     <div class="grid cols-2 onepager">
       <div class="card">
@@ -160,13 +174,18 @@
       </div>
     </div>
 
-    {% if vision_html or sections_html %}
-    <div class="card section">
-      <h2>Vision & Additional sections</h2>
-      {% if vision_html %}<div>{{ vision_html|safe }}</div>{% endif %}
-      {% if sections_html %}<div style="margin-top:.6rem">{{ sections_html|safe }}</div>{% endif %}
-    </div>
+{% if vision_html or sections_html %}
+  <div class="card section">
+    <h2>Vision & Additional sections</h2>
+    {% if vision_html %}
+      <div class="vision-card" style="margin-bottom:.6rem">{{ vision_html|safe }}</div>
     {% endif %}
+    {% if sections_html %}
+      <div>{{ sections_html|safe }}</div>
+    {% endif %}
+  </div>
+{% endif %}
+
 
     <div class="footer">
       <div style="display:flex;align-items:center;gap:12px">
