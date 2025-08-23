@@ -1,4 +1,4 @@
-// index.js – PDF-Service (robust, mit Pfad-Sanitizer & Mail-Status-Headern)
+// index.js — PDF-Service (Gold-Standard)
 import express from "express";
 import cors from "cors";
 import nodemailer from "nodemailer";
@@ -10,6 +10,7 @@ import puppeteer from "puppeteer";
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Body-Limits konfigurierbar
 app.use(bodyParser.json({ limit: process.env.JSON_LIMIT || "10mb" }));
 app.use(
   bodyParser.text({
@@ -19,17 +20,15 @@ app.use(
 );
 app.use(cors({ origin: "*" }));
 
-// --- kleine Hilfsfunktionen ---------------------------------------------------
-
+// ---------- Helpers ----------
 function makeTransport() {
   const secure = String(process.env.SMTP_SECURE || "true").toLowerCase() === "true";
   const port = parseInt(process.env.SMTP_PORT || (secure ? "465" : "587"), 10);
 
   if (!process.env.SMTP_HOST) {
-    // Kein SMTP konfiguriert -> Stub, der "schluckt"
+    // Kein SMTP → Stub (schluckt)
     return { sendMail: async () => ({ accepted: [], rejected: ["(skipped: SMTP_HOST not set)"] }) };
   }
-
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port,
@@ -43,8 +42,6 @@ function makeTransport() {
   });
 }
 
-// Entfernt **ungültige** Browser-Pfade aus der ENV – sonst erzwingt Puppeteer
-// einen kaputten Pfad und crasht.
 function sanitizePuppeteerEnv() {
   const removed = [];
   for (const key of ["PUPPETEER_EXECUTABLE_PATH", "CHROME_PATH"]) {
@@ -54,38 +51,26 @@ function sanitizePuppeteerEnv() {
       delete process.env[key];
     }
   }
-  if (removed.length) {
-    console.warn("[PDFSERVICE] removed invalid exec paths from env:", removed);
-  }
+  if (removed.length) console.warn("[PDFSERVICE] removed invalid exec paths:", removed);
 }
 
-// Ermittelt einen ausführbaren Chrome/Chromium-Pfad.
 async function resolveChromePath() {
-  // 1) ENV (wenn vorhanden & gültig)
   const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH;
   if (envPath && fs.existsSync(envPath)) return envPath;
 
-  // 2) Puppeteer-Default (im Base-Image vorhanden)
   try {
     const p = puppeteer.executablePath();
     if (p && fs.existsSync(p)) return p;
-  } catch {
-    /* noop */
-  }
+  } catch {}
 
-  // 3) Fallback-Pfade
   const fallbacks = [
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
   ];
-  for (const p of fallbacks) {
-    if (fs.existsSync(p)) return p;
-  }
-
-  // 4) Nichts gefunden -> Puppeteer versucht „auto“ (meist fehlschlagend, wenn Skip Download)
-  return null;
+  for (const p of fallbacks) if (fs.existsSync(p)) return p;
+  return null; // Puppeteer auto
 }
 
 async function renderPdf(html) {
@@ -102,48 +87,47 @@ async function renderPdf(html) {
       "--disable-gpu",
       "--disable-web-security",
     ],
-    protocolTimeout: 120000,
+    protocolTimeout: parseInt(process.env.PUPPETEER_PROTOCOL_TIMEOUT || "180000", 10),
   };
   if (execPath) launchOpts.executablePath = execPath;
 
   console.log("[PDFSERVICE] chrome exec:", execPath || "(auto via puppeteer)");
 
   const browser = await puppeteer.launch(launchOpts);
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: "networkidle0" });
-  const pdf = await page.pdf({
-    format: "A4",
-    printBackground: true,
-    margin: { top: "12mm", right: "12mm", bottom: "16mm", left: "12mm" },
-  });
-  await browser.close();
-  return pdf;
+  try {
+    const page = await browser.newPage();
+    await page.setCacheEnabled(false);
+    await page.emulateMediaType("screen");
+    await page.setContent(html, { waitUntil: "networkidle0" });
+
+    const pdf = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      preferCSSPageSize: true,
+      margin: { top: "12mm", right: "12mm", bottom: "16mm", left: "12mm" },
+    });
+    return pdf;
+  } finally {
+    await browser.close();
+  }
 }
-
-// --- Routen --------------------------------------------------------------------
-
+// ---------- Routes ----------
 app.get("/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
-// Diagnose: zeig gefundene Pfade an
 app.get("/env", (_req, res) => {
+  let exec = null;
+  try { exec = puppeteer.executablePath(); } catch {}
   const fallbacks = [
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
-  ];
-  const exists = fallbacks.filter((p) => fs.existsSync(p));
-  let exec = null;
-  try {
-    exec = puppeteer.executablePath();
-  } catch {
-    exec = null;
-  }
+  ].filter((p) => fs.existsSync(p));
   res.json({
     ok: true,
     puppeteerExecutablePath: exec || null,
     envExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH || null,
-    fallbacksExisting: exists,
+    fallbacksExisting: fallbacks,
   });
 });
 
@@ -154,26 +138,28 @@ app.post("/generate-pdf", async (req, res) => {
 
   const adminEmail = process.env.ADMIN_EMAIL || "";
   let userEmail = req.get("X-User-Email") || "";
+  let subject = req.get("X-Subject") || process.env.SUBJECT || "Ihr KI-Readiness-Report";
+  const reqLang = (req.get("X-Lang") || "").toLowerCase();
 
-  // Input akzeptieren als text/html **oder** JSON { html, to }
+  // Input: text/html ODER JSON { html, to, subject, lang }
   let html = "";
-  const ctype = (req.headers["content-type"] || "").toLowerCase();
+  const ctype = String(req.headers["content-type"] || "").toLowerCase();
 
   if (typeof req.body === "string" && ctype.startsWith("text/")) {
     html = req.body;
   } else if (req.is("application/json")) {
-    const { html: h, to } = req.body || {};
+    const { html: h, to, subject: subj, lang } = req.body || {};
     html = h || "";
     if (to) userEmail = String(to);
+    if (subj) subject = String(subj);
+    if (lang) subject = subject; // (Platzhalter – falls du Betreff nach Sprache variieren willst)
   } else {
     return res.status(415).json({ ok: false, error: "Unsupported Content-Type" });
   }
 
-  if (!html || html.length < 20) {
-    return res.status(400).json({ ok: false, error: "Empty html" });
-  }
+  if (!html || html.length < 20) return res.status(400).json({ ok: false, error: "Empty html" });
 
-  console.log("[PDFSERVICE] Render start", { rid, len: html.length, userEmail });
+  console.log("[PDFSERVICE] Render start", { rid, len: html.length, userEmail, lang: reqLang || null });
 
   let pdfBuffer;
   try {
@@ -184,9 +170,8 @@ app.post("/generate-pdf", async (req, res) => {
     return res.status(500).json({ ok: false, error: String(e) });
   }
 
-  // Mails (best-effort, kein 500 außer EMAIL_STRICT=true)
-  let adminStatus = "skip",
-    userStatus = "skip";
+  // Mails
+  let adminStatus = "skip", userStatus = "skip";
   if (emailEnabled) {
     try {
       const transporter = makeTransport();
@@ -198,56 +183,38 @@ app.post("/generate-pdf", async (req, res) => {
         tasks.push(
           transporter
             .sendMail({
-              from,
-              replyTo,
-              to: adminEmail,
+              from, replyTo, to: adminEmail,
               subject: "KI-Readiness Report erzeugt",
               text: `Ein neuer Report wurde erstellt. RID=${rid}`,
               attachments: [{ filename: "KI-Readiness-Report.pdf", content: pdfBuffer }],
             })
-            .then(() => {
-              adminStatus = "ok";
-              console.log("[PDFSERVICE] Admin-Mail ok:", adminEmail);
-            })
-            .catch((err) => {
-              adminStatus = "fail";
-              console.error("[PDFSERVICE] Admin-Mail Fehler:", err?.message || err);
-            })
+            .then(() => { adminStatus = "ok"; console.log("[PDFSERVICE] Admin-Mail ok:", adminEmail); })
+            .catch((err) => { adminStatus = "fail"; console.error("[PDFSERVICE] Admin-Mail Fehler:", err?.message || err); })
         );
       }
-
       if (userEmail) {
         tasks.push(
           transporter
             .sendMail({
-              from,
-              replyTo,
-              to: userEmail,
-              subject: "Ihr KI-Readiness-Report",
-              text: "Vielen Dank. Anbei Ihr individueller KI-Readiness-Report.",
+              from, replyTo, to: userEmail,
+              subject,
+              text: reqLang === "en"
+                ? "Thank you. Your individual AI Readiness report is attached."
+                : "Vielen Dank. Anbei Ihr individueller KI-Readiness-Report.",
               attachments: [{ filename: "KI-Readiness-Report.pdf", content: pdfBuffer }],
             })
-            .then(() => {
-              userStatus = "ok";
-              console.log("[PDFSERVICE] Nutzer-Mail ok:", userEmail);
-            })
-            .catch((err) => {
-              userStatus = "fail";
-              console.error("[PDFSERVICE] Nutzer-Mail Fehler:", err?.message || err);
-            })
+            .then(() => { userStatus = "ok"; console.log("[PDFSERVICE] Nutzer-Mail ok:", userEmail); })
+            .catch((err) => { userStatus = "fail"; console.error("[PDFSERVICE] Nutzer-Mail Fehler:", err?.message || err); })
         );
       }
-
       await Promise.allSettled(tasks);
     } catch (e) {
       console.error("[PDFSERVICE] sendMail setup error:", e?.message || e);
-      if (emailStrict) {
-        return res.status(502).json({ ok: false, error: "Email send failed", admin: adminStatus, user: userStatus });
-      }
+      if (emailStrict) return res.status(502).json({ ok: false, error: "Email send failed", admin: adminStatus, user: userStatus });
     }
   }
 
-  // Immer PDF liefern – Mail-Status in Headern
+  // PDF immer liefern; Mail-Status in Headern
   res.setHeader("X-Email-Admin", adminStatus);
   res.setHeader("X-Email-User", userStatus);
   res.setHeader("Content-Type", "application/pdf");
