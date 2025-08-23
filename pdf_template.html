@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>KI-Readiness-Report</title>
   <style>
-    :root {
+    :root{
       --brand-blue:#1f66ff;
       --brand-green:#18a999;
       --ink:#0a122a;
@@ -15,10 +15,10 @@
       --border:#e5ecf4;
     }
     *{box-sizing:border-box}
-    html,body{margin:0;padding:0;font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg)}
-    h1,h2,h3{margin:0 0 .4rem 0;font-weight:700}
+    html,body{margin:0;padding:0;font:14px/1.55 Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+    h1,h2,h3{margin:0 0 .5rem 0;font-weight:700}
     h1{font-size:26px}
-    h2{font-size:20px;border-bottom:2px solid var(--border);padding-bottom:.3rem;margin-top:1.2rem}
+    h2{font-size:20px;border-bottom:2px solid var(--border);padding-bottom:.35rem;margin-top:1.2rem}
     h3{font-size:16px;margin:.8rem 0 .4rem}
     p{margin:.35rem 0}
     small,em{color:var(--muted)}
@@ -33,7 +33,6 @@
     .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px}
     .grid{display:grid;gap:14px}
     .grid.cols-2{grid-template-columns:1fr 1fr}
-    .kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px}
     .footer{margin-top:18px;padding-top:8px;border-top:1px dashed var(--border);font-size:12px;color:var(--muted)}
     table{width:100%;border-collapse:collapse;margin:.4rem 0}
     th,td{border:1px solid var(--border);padding:8px;text-align:left;vertical-align:top}
@@ -43,50 +42,25 @@
     @page{size:A4 margin:16mm}
     .onepager{page-break-inside:avoid}
     .section{page-break-inside:auto}
-/* === Print/PDF Gold-Standard === */
-@media print {
-  /* Exakte Markenfarben im Druck */
-  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-
-  /* Kontrast-Boost für Texte */
-  body { color: #0a122a; background: #ffffff; }
-
-  /* Links als dunkler Text (keine knalligen Unterstreichungen) */
-  a { color: #0a122a; border-bottom: 1px dotted #999; text-decoration: none; }
-
-  /* Karten & Tabellen nicht auseinanderreißen */
-  .card, .onepager, table, thead, tbody, tr, td, th {
-    break-inside: avoid !important;
-    page-break-inside: avoid !important;
-  }
-
-  /* Schöne Tabellen-Köpfe */
-  thead { display: table-header-group; }
-  tfoot { display: table-footer-group; }
-
-  /* Minimale Seitenränder sind bereits gesetzt; hier optional noch mal konservativ */
-  @page { size: A4; margin: 16mm; }
-
-  /* Kleinere Captions und mehr Luft bei Diagrammen */
-  .caption { font-size: 11px; color: #3b455a; }
-}
-
-/* Optional: Dark-Mode-Ausgabe für on-screen Preview (nicht für Print) */
-@media (prefers-color-scheme: dark) {
-  html, body { background: #0d1220; color: #e6e9f0; }
-  .card, .svgbox { background: #121a2b; border-color: #1e2a45; }
-  th { background: #18243d; }
-  a { color: #7fb3ff; border-bottom-color: rgba(127,179,255,.4); }
-  .footer { color: #a8b3c4; border-top-color: #1e2a45; }
-}
-
-/* Kleinzeug: bessere Bild- & Wortumbrüche */
-img { max-width: 100%; height: auto; }
-p, li { hyphens: auto; }
-
+    /* Print/Dark */
+    @media print {
+      *{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body{ background:#fff; color:#0a122a; }
+      a{ color:#0a122a; border-bottom:1px dotted #999; text-decoration:none; }
+      thead{ display: table-header-group; }
+      tfoot{ display: table-footer-group; }
+    }
+    @media (prefers-color-scheme: dark){
+      html,body{background:#0d1220;color:#e6e9f0}
+      .card,.svgbox{background:#121a2b;border-color:#1e2a45}
+      th{background:#18243d}
+      .footer{color:#a8b3c4;border-top-color:#1e2a45}
+      a{color:#7fb3ff;border-bottom-color:rgba(127,179,255,.4)}
+    }
   </style>
 </head>
 <body>
+  <!-- Header -->
   <div class="header">
     <div class="inner">
       {% if logo_main %}<img src="{{ logo_main }}" alt="KI-Sicherheit" />{% endif %}
@@ -103,6 +77,17 @@ p, li { hyphens: auto; }
   </div>
 
   <div class="container">
+    <!-- Stammdaten (optional) -->
+    {% if branche or unternehmensgroesse or bundesland or hauptleistung %}
+    <div class="card">
+      <h2>Unternehmensrahmen</h2>
+      <p><b>Branche:</b> {{ branche or "-" }}</p>
+      <p><b>Größe:</b> {{ unternehmensgroesse or "-" }}</p>
+      <p><b>Bundesland:</b> {{ bundesland or "-" }}</p>
+      <p><b>Hauptleistung:</b> {{ hauptleistung or "-" }}</p>
+    </div>
+    {% endif %}
+
     <!-- One-Pager -->
     <div class="grid cols-2 onepager">
       <div class="card">
@@ -121,7 +106,9 @@ p, li { hyphens: auto; }
         </div>
       </div>
     </div>
+
     <!-- Quick Wins & Risiken -->
+    {% if quick_wins_html or risks_html %}
     <div class="grid cols-2 section">
       <div class="card">
         <h2>Quick Wins</h2>
@@ -132,11 +119,12 @@ p, li { hyphens: auto; }
         <div>{{ risks_html|safe }}</div>
       </div>
     </div>
+    {% endif %}
 
     <!-- Empfehlungen & Roadmap -->
     <div class="grid cols-2 section">
       <div class="card">
-        <h2>Empfehlungen</h2>
+        <h2>Empfehlungen (Next Steps)</h2>
         <div>{{ recommendations_html|safe }}</div>
       </div>
       <div class="card">
@@ -148,46 +136,58 @@ p, li { hyphens: auto; }
     <!-- Tabellen -->
     <div class="grid cols-2 section">
       <div class="card">
-        <h2>Förderprogramme</h2>
-        {% if foerderprogramme_table %}
-          <table>
-            <thead><tr><th>Name</th><th>Zielgruppe</th><th>Förderhöhe</th><th>Link</th></tr></thead>
-            <tbody>
-              {% for row in foerderprogramme_table %}
-              <tr>
-                <td>{{ row.name }}</td>
-                <td>{{ row.zielgruppe }}</td>
-                <td>{{ row.foerderhoehe }}</td>
-                <td>{% if row.link %}<a href="{{ row.link }}">Link</a>{% endif %}</td>
-              </tr>{% endfor %}
-            </tbody>
-          </table>
-        {% else %}<p><em>Keine Programme gefunden.</em></p>{% endif %}
+        <h2>Förderprogramme (Auswahl)</h2>
+        {% if foerderprogramme_table and foerderprogramme_table|length>0 %}
+        <table>
+          <thead><tr><th>Programm</th><th>Zielgruppe</th><th>Förderhöhe</th><th>Link</th></tr></thead>
+          <tbody>
+          {% for p in foerderprogramme_table %}
+            <tr>
+              <td>{{ p.name }}</td>
+              <td>{{ p.zielgruppe }}</td>
+              <td>{{ p.foerderhoehe }}</td>
+              <td>{% if p.link %}<a href="{{ p.link }}">Details</a>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+          <p><em>Keine Programme in der Datenbasis.</em></p>
+        {% endif %}
       </div>
+
       <div class="card">
-        <h2>Tools</h2>
-        {% if tools_table %}
-          <table>
-            <thead><tr><th>Name</th><th>Einsatz</th><th>Kosten</th><th>Link</th></tr></thead>
-            <tbody>
-              {% for t in tools_table %}
-              <tr>
-                <td>{{ t.name }}</td><td>{{ t.usecase }}</td><td>{{ t.cost }}</td>
-                <td>{% if t.link %}<a href="{{ t.link }}">Link</a>{% endif %}</td>
-              </tr>{% endfor %}
-            </tbody>
-          </table>
-        {% else %}<p><em>Tool-Liste folgt.</em></p>{% endif %}
+        <h2>KI-Tools & Software</h2>
+        {% if tools_table and tools_table|length>0 %}
+        <table>
+          <thead><tr><th>Tool</th><th>Einsatz</th><th>Kosten</th><th>Link</th></tr></thead>
+          <tbody>
+          {% for t in tools_table %}
+            <tr>
+              <td>{{ t.name }}</td>
+              <td>{{ t.usecase }}</td>
+              <td>{{ t.cost }}</td>
+              <td>{% if t.link %}<a href="{{ t.link }}">Details</a>{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+          <p><em>Tool-Liste wird dynamisch ergänzt.</em></p>
+        {% endif %}
       </div>
     </div>
 
-    <!-- Vision & weitere Kapitel -->
+    <!-- Vision & Weitere Kapitel -->
+    {% if vision_html or sections_html %}
     <div class="card section">
       <h2>Vision & Weitere Kapitel</h2>
-      <div>{{ sections_html|safe }}</div>
+      {% if vision_html %}<div>{{ vision_html|safe }}</div>{% endif %}
+      {% if sections_html %}<div style="margin-top:.6rem">{{ sections_html|safe }}</div>{% endif %}
     </div>
+    {% endif %}
 
-    <!-- Footer -->
+    <!-- Footer / Logos -->
     <div class="footer">
       <div style="display:flex;align-items:center;gap:12px">
         {% if logo_tuev %}<img src="{{ logo_tuev }}" alt="TÜV" style="height:18px">{% endif %}
@@ -198,11 +198,54 @@ p, li { hyphens: auto; }
     </div>
   </div>
 
-  <!-- Charts-Script (Gauge & Radar wie gehabt) -->
+  <!-- Charts (offline SVG, robust für PDF) -->
   <script>
     (function(){
       const data = ({{ chart_data_json | safe }}) || { score: 0, dimensions: { labels: [], values: [] } };
-      /* identisch zum bestehenden Chart-Code belassen */
+
+      // Gauge
+      const g = document.getElementById('gauge');
+      const pct = Math.max(0, Math.min(100, parseInt(data.score||0)));
+      const cx=100, cy=100, r=90;
+      const toXY=(ang)=>[cx + r*Math.cos(ang), cy + r*Math.sin(ang)];
+      const bgPath = `M ${toXY(Math.PI).join(' ')} A ${r} ${r} 0 0 1 ${toXY(0).join(' ')}`;
+      const angle = Math.PI * (1 - pct/100);
+      const fgLargeArc = (pct>50)?1:0;
+      const fgPath = `M ${toXY(Math.PI).join(' ')} A ${r} ${r} 0 ${fgLargeArc} 1 ${toXY(angle).join(' ')}`;
+      g.innerHTML = `
+        <path d="${bgPath}" fill="none" stroke="#e5ecf4" stroke-width="16" />
+        <path d="${fgPath}" fill="none" stroke="url(#grad)" stroke-width="16" stroke-linecap="round" />
+        <defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#1f66ff"/><stop offset="100%" stop-color="#18a999"/>
+        </linearGradient></defs>
+        <text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="28" font-weight="700" fill="#0a122a">${pct}%</text>
+      `;
+
+      // Radar
+      const rsvg = document.getElementById('radar');
+      const labels = (data.dimensions && data.dimensions.labels) || [];
+      const values = (data.dimensions && data.dimensions.values) || [];
+      const R=90, CX=110, CY=110, N=labels.length||6;
+      const ring=(k)=>`<circle cx="${CX}" cy="${CY}" r="${(R/5)*k}" fill="none" stroke="#e5ecf4" stroke-width="1"/>`;
+      let grid = Array.from({length:5},(_,i)=>ring(i+1)).join('');
+      for(let i=0;i<N;i++){
+        const a = -Math.PI/2 + i*(2*Math.PI/N);
+        grid += `<line x1="${CX}" y1="${CY}" x2="${CX+90*Math.cos(a)}" y2="${CY+90*Math.sin(a)}" stroke="#e5ecf4" stroke-width="1"/>`;
+      }
+      const pts = values.map((v,i)=>{
+        const a = -Math.PI/2 + i*(2*Math.PI/N);
+        const rr = (Math.max(0,Math.min(5,parseFloat(v)||0))/5)*90;
+        return `${CX + rr*Math.cos(a)},${CY + rr*Math.sin(a)}`
+      }).join(' ');
+      let lbl='';
+      for(let i=0;i<N;i++){
+        const a = -Math.PI/2 + i*(2*Math.PI/N);
+        const x = CX + (90+12)*Math.cos(a), y = CY + (90+12)*Math.sin(a);
+        lbl += `<text x="${x}" y="${y}" font-size="9" text-anchor="middle" fill="#5b6b7a">${labels[i]||''}</text>`;
+      }
+      rsvg.innerHTML = `${grid}
+        <polygon points="${pts}" fill="rgba(31,102,255,0.18)" stroke="#1f66ff" stroke-width="2"/>
+        ${lbl}`;
     })();
   </script>
 </body>
