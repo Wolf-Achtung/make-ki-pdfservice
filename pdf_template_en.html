@@ -9,7 +9,7 @@
     *{box-sizing:border-box}
     html,body{margin:0;padding:0;font:14px/1.55 Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg)}
     h1,h2,h3{margin:0 0 .5rem 0;font-weight:700}
-    h1{font-size:26px} h2{font-size:20px;border-bottom:2px solid var(--border);padding-bottom:.35rem;margin-top:1.2rem}
+    h1{font-size:28px} h2{font-size:20px;border-bottom:2px solid var(--border);padding-bottom:.35rem;margin-top:1.2rem}
     h3{font-size:16px;margin:.8rem 0 .4rem}
     p{margin:.35rem 0} small,em{color:var(--muted)}
     ul,ol{margin:.4rem 0 .6rem 1.2rem} a{color:var(--brand-blue);text-decoration:none;border-bottom:1px solid rgba(31,102,255,.35)}
@@ -25,34 +25,27 @@
     .footer{margin-top:18px;padding-top:8px;border-top:1px dashed var(--border);font-size:12px;color:var(--muted)}
     table{width:100%;border-collapse:collapse;margin:.4rem 0}
     th,td{border:1px solid var(--border);padding:8px;text-align:left;vertical-align:top}
-    th{background:#eef4ff}
+    th{background:var(--brand-blue);color:#fff}
     .svgbox{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:10px}
     .caption{font-size:12px;color:var(--muted);margin-top:.25rem}
-    @page{size:A4 margin:16mm}
-    .onepager{page-break-inside:avoid}
-    .section{page-break-inside:auto}
-    @media print {
-      *{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      body{ background:#fff; color:#0a122a; }
-      a{ color:#0a122a; border-bottom:1px dotted #999; text-decoration:none; }
-      thead{ display: table-header-group; }
-      tfoot{ display: table-footer-group; }
-    }
-    @media (prefers-color-scheme: dark){
-      html,body{background:#0d1220;color:#e6e9f0}
-      .card,.svgbox{background:#121a2b;border-color:#1e2a45}
-      th{background:#18243d}
-      .footer{color:#a8b3c4;border-top-color:#1e2a45}
-      a{color:#7fb3ff;border-bottom-color:rgba(127,179,255,.4)}
-    }
-/* TOC & Vision */
-.toc-card{background:var(--card);border:1px dashed var(--border);border-radius:14px;padding:14px}
-.toc-card ul{margin:.3rem 0 .2rem 1rem}
-.toc-card li{margin:.15rem 0}
-.vision-card{background:linear-gradient(180deg, rgba(24,169,153,.08), rgba(31,102,255,.08));
-  border:1px solid rgba(31,102,255,.25); border-left:4px solid var(--brand-blue);
-  border-radius:12px; padding:14px; }
 
+    /* Cover */
+    .cover{background:linear-gradient(180deg,#eef4ff,#ffffff); border:1px solid var(--border); border-radius:16px; padding:24px; margin:16px 0 24px}
+    .score-pill{display:inline-block;background:#eaf6ff;border:1px solid #b5d6f6;border-radius:999px;padding:6px 10px;font-weight:700}
+
+    /* TOC & Vision */
+    .toc-card{background:var(--card);border:1px dashed var(--border);border-radius:14px;padding:14px}
+    .toc-card ul{margin:.3rem 0 .2rem 1rem} .toc-card li{margin:.15rem 0}
+    .vision-card{background:linear-gradient(180deg, rgba(24,169,153,.08), rgba(31,102,255,.08)); border:1px solid rgba(31,102,255,.25); border-left:4px solid var(--brand-blue); border-radius:12px; padding:14px;}
+
+    /* Timeline */
+    .timeline{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+    .t-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
+    .t-title{font-weight:700;margin-bottom:.2rem}
+
+    @page{size:A4 margin:16mm}
+    .onepager{page-break-inside:avoid} .section{page-break-inside:auto}
+    @media print{ *{ -webkit-print-color-adjust: exact; print-color-adjust: exact } body{background:#fff;color:#0a122a} a{color:#0a122a;border-bottom:1px dotted #999;text-decoration:none} thead{display:table-header-group} tfoot{display:table-footer-group}}
   </style>
 </head>
 <body>
@@ -61,38 +54,41 @@
       {% if logo_main %}<img src="{{ logo_main }}" alt="KI-Sicherheit" />{% endif %}
       <div>
         <h1>AI Readiness Report 2025</h1>
-        <div class="meta">
-          <div>Date: {{ today }}</div>
-          <div>Language: EN</div>
-          <div>Score: <strong>{{ "%d"|format(score_percent) }}%</strong></div>
-        </div>
+        <div class="meta"><div>Date: {{ today }}</div><div>Language: EN</div><div>Score: <strong>{{ "%d"|format(score_percent) }}%</strong></div></div>
       </div>
       <div class="badge">{% if badge_ready %}<img src="{{ badge_ready }}" alt="Badge" style="height:38px">{% endif %}</div>
     </div>
   </div>
 
   <div class="container">
-    {% if branche or unternehmensgroesse or bundesland or hauptleistung %}
-    <div class="card">
-      <h2>Profile</h2>
-      <p><b>Industry:</b> {{ branche or "-" }}</p>
-      <p><b>Company size:</b> {{ unternehmensgroesse or "-" }}</p>
-      <p><b>State/Region:</b> {{ bundesland or "-" }}</p>
-      <p><b>Main service/product:</b> {{ hauptleistung or "-" }}</p>
+    <div class="cover">
+      <h1>Your AI-readiness at a glance</h1>
+      <p class="score-pill">Overall score: {{ "%d"|format(score_percent) }}%</p>
+      {% if preface %}<div style="margin-top:.6rem">{{ preface|safe }}</div>{% endif %}
+      {% if branche or unternehmensgroesse or bundesland or hauptleistung %}
+        <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:.6rem">
+          <div><b>Industry:</b> {{ branche or "-" }}</div>
+          <div><b>Company size:</b> {{ unternehmensgroesse or "-" }}</div>
+          <div><b>Region:</b> {{ bundesland or "-" }}</div>
+          <div><b>Main service/product:</b> {{ hauptleistung or "-" }}</div>
+        </div>
+      {% endif %}
     </div>
+
+    {% if toc_html and toc_html|trim %}
+      <div class="card toc-card">
+        <h2>Table of contents</h2>
+        {{ toc_html|safe }}
+      </div>
     {% endif %}
-{% if toc_html %}
-  <div class="card toc-card">
-    <h2>Table of contents</h2>
-    {{ toc_html|safe }}
-  </div>
-{% endif %}
 
     <div class="grid cols-2 onepager">
+      {% if exec_summary_html and exec_summary_html|trim %}
       <div class="card">
         <h2>Executive summary</h2>
         <div>{{ exec_summary_html|safe }}</div>
       </div>
+      {% endif %}
       <div class="card">
         <h2>Score & visuals</h2>
         <div class="svgbox">
@@ -106,28 +102,30 @@
       </div>
     </div>
 
-    {% if quick_wins_html or risks_html %}
+    {% if (quick_wins_html and quick_wins_html|trim) or (risks_html and risks_html|trim) %}
     <div class="grid cols-2 section">
-      <div class="card">
-        <h2>Quick wins</h2>
-        <div>{{ quick_wins_html|safe }}</div>
-      </div>
-      <div class="card">
-        <h2>Key risks</h2>
-        <div>{{ risks_html|safe }}</div>
-      </div>
+      {% if quick_wins_html and quick_wins_html|trim %}
+      <div class="card"><h2>Quick wins ⚡</h2><div>{{ quick_wins_html|safe }}</div></div>
+      {% endif %}
+      {% if risks_html and risks_html|trim %}
+      <div class="card"><h2>Key risks ⚠️</h2><div>{{ risks_html|safe }}</div></div>
+      {% endif %}
     </div>
     {% endif %}
 
     <div class="grid cols-2 section">
-      <div class="card">
-        <h2>Recommendations (Next steps)</h2>
-        <div>{{ recommendations_html|safe }}</div>
-      </div>
-      <div class="card">
-        <h2>Roadmap</h2>
-        <div>{{ roadmap_html|safe }}</div>
-      </div>
+      {% if recommendations_html and recommendations_html|trim %}
+        <div class="card"><h2>Recommendations (Next steps) 🎯</h2><div>{{ recommendations_html|safe }}</div></div>
+      {% endif %}
+      {% if roadmap_html and roadmap_html|trim %}
+        <div class="card"><h2>Roadmap</h2>
+          <div class="timeline">
+            <div class="t-card"><div class="t-title">30 days</div><div>{{ roadmap_html|safe }}</div></div>
+            <div class="t-card"><div class="t-title">3 months</div><div><!-- mid-term subset --></div></div>
+            <div class="t-card"><div class="t-title">12 months</div><div><!-- long-term subset --></div></div>
+          </div>
+        </div>
+      {% endif %}
     </div>
 
     <div class="grid cols-2 section">
@@ -138,18 +136,12 @@
           <thead><tr><th>Name</th><th>Target group</th><th>Amount</th><th>Link</th></tr></thead>
           <tbody>
           {% for row in foerderprogramme_table %}
-            <tr>
-              <td>{{ row.name }}</td>
-              <td>{{ row.zielgruppe }}</td>
-              <td>{{ row.foerderhoehe }}</td>
-              <td>{% if row.link %}<a href="{{ row.link }}">Details</a>{% endif %}</td>
-            </tr>
+            <tr><td>{{ row.name }}</td><td>{{ row.zielgruppe }}</td><td>{{ row.foerderhoehe }}</td>
+              <td>{% if row.link %}<a href="{{ row.link }}">Details</a>{% endif %}</td></tr>
           {% endfor %}
           </tbody>
         </table>
-        {% else %}
-          <p><em>No matching items in the local dataset.</em></p>
-        {% endif %}
+        {% else %}<p><em>No matching items in the local dataset.</em></p>{% endif %}
       </div>
 
       <div class="card">
@@ -159,40 +151,29 @@
           <thead><tr><th>Name</th><th>Use case</th><th>Cost</th><th>Link</th></tr></thead>
           <tbody>
           {% for t in tools_table %}
-            <tr>
-              <td>{{ t.name }}</td>
-              <td>{{ t.usecase }}</td>
-              <td>{{ t.cost }}</td>
-              <td>{% if t.link %}<a href="{{ t.link }}">Details</a>{% endif %}</td>
-            </tr>
+            <tr><td>{{ t.name }}</td><td>{{ t.usecase }}</td><td>{{ t.cost }}</td>
+              <td>{% if t.link %}<a href="{{ t.link }}">Details</a>{% endif %}</td></tr>
           {% endfor %}
           </tbody>
         </table>
-        {% else %}
-          <p><em>Tool list will be populated dynamically.</em></p>
-        {% endif %}
+        {% else %}<p><em>Tool list will be populated dynamically.</em></p>{% endif %}
       </div>
     </div>
 
-{% if vision_html or sections_html %}
-  <div class="card section">
-    <h2>Vision & Additional sections</h2>
-    {% if vision_html %}
-      <div class="vision-card" style="margin-bottom:.6rem">{{ vision_html|safe }}</div>
+    {% if vision_html or sections_html %}
+      <div class="card section">
+        <h2>Vision & Additional sections</h2>
+        {% if vision_html %}<div class="vision-card" style="margin-bottom:.6rem">{{ vision_html|safe }}</div>{% endif %}
+        {% if sections_html %}<div>{{ sections_html|safe }}</div>{% endif %}
+      </div>
     {% endif %}
-    {% if sections_html %}
-      <div>{{ sections_html|safe }}</div>
-    {% endif %}
-  </div>
-{% endif %}
-
 
     <div class="footer">
       <div style="display:flex;align-items:center;gap:12px">
         {% if logo_tuev %}<img src="{{ logo_tuev }}" alt="TÜV" style="height:18px">{% endif %}
         {% if logo_euai %}<img src="{{ logo_euai }}" alt="EU AI" style="height:18px">{% endif %}
         {% if logo_dsgvo %}<img src="{{ logo_dsgvo }}" alt="GDPR" style="height:18px">{% endif %}
-        <span>{{ footer_text }}</span>
+        <span>© 2025 KI-Sicherheit.jetzt – GDPR & EU-AI-Act-Ready – Wolf Hohl</span>
       </div>
     </div>
   </div>
@@ -200,49 +181,18 @@
   <script>
     (function(){
       const data = ({{ chart_data_json | safe }}) || { score: 0, dimensions: { labels: [], values: [] } };
-      // Gauge
-      const g = document.getElementById('gauge');
-      const pct = Math.max(0, Math.min(100, parseInt(data.score||0)));
-      const cx=100, cy=100, r=90;
-      const toXY=(ang)=>[cx + r*Math.cos(ang), cy + r*Math.sin(ang)];
-      const bgPath = `M ${toXY(Math.PI).join(' ')} A ${r} ${r} 0 0 1 ${toXY(0).join(' ')}`;
-      const angle = Math.PI * (1 - pct/100);
-      const fgLargeArc = (pct>50)?1:0;
-      const fgPath = `M ${toXY(Math.PI).join(' ')} A ${r} ${r} 0 ${fgLargeArc} 1 ${toXY(angle).join(' ')}`;
-      g.innerHTML = `
-        <path d="${bgPath}" fill="none" stroke="#e5ecf4" stroke-width="16" />
-        <path d="${fgPath}" fill="none" stroke="url(#grad)" stroke-width="16" stroke-linecap="round" />
-        <defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#1f66ff"/><stop offset="100%" stop-color="#18a999"/>
-        </linearGradient></defs>
-        <text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="28" font-weight="700" fill="#0a122a">${pct}%</text>
-      `;
-
-      // Radar
-      const rsvg = document.getElementById('radar');
-      const labels = (data.dimensions && data.dimensions.labels) || [];
-      const values = (data.dimensions && data.dimensions.values) || [];
-      const R=90, CX=110, CY=110, N=labels.length||6;
-      const ring=(k)=>`<circle cx="${CX}" cy="${CY}" r="${(R/5)*k}" fill="none" stroke="#e5ecf4" stroke-width="1"/>`;
-      let grid = Array.from({length:5},(_,i)=>ring(i+1)).join('');
-      for(let i=0;i<N;i++){
-        const a = -Math.PI/2 + i*(2*Math.PI/N);
-        grid += `<line x1="${CX}" y1="${CY}" x2="${CX+90*Math.cos(a)}" y2="${CY+90*Math.sin(a)}" stroke="#e5ecf4" stroke-width="1"/>`;
-      }
-      const pts = values.map((v,i)=>{
-        const a = -Math.PI/2 + i*(2*Math.PI/N);
-        const rr = (Math.max(0,Math.min(5,parseFloat(v)||0))/5)*90;
-        return `${CX + rr*Math.cos(a)},${CY + rr*Math.sin(a)}`
-      }).join(' ');
-      let lbl='';
-      for(let i=0;i<N;i++){
-        const a = -Math.PI/2 + i*(2*Math.PI/N);
-        const x = CX + (90+12)*Math.cos(a), y = CY + (90+12)*Math.sin(a);
-        lbl += `<text x="${x}" y="${y}" font-size="9" text-anchor="middle" fill="#5b6b7a">${labels[i]||''}</text>`;
-      }
-      rsvg.innerHTML = `${grid}
-        <polygon points="${pts}" fill="rgba(31,102,255,0.18)" stroke="#1f66ff" stroke-width="2"/>
-        ${lbl}`;
+      const g=document.getElementById('gauge'); const pct=Math.max(0,Math.min(100,parseInt(data.score||0)));
+      const cx=100, cy=100, r=90, toXY=(a)=>[cx+r*Math.cos(a), cy+r*Math.sin(a)];
+      const bg=`M ${toXY(Math.PI).join(' ')} A ${r} ${r} 0 0 1 ${toXY(0).join(' ')}`;
+      const ang=Math.PI*(1-pct/100), arc=(pct>50)?1:0;
+      const fg=`M ${toXY(Math.PI).join(' ')} A ${r} ${r} 0 ${arc} 1 ${toXY(ang).join(' ')}`;
+      g.innerHTML = `<path d="${bg}" fill="none" stroke="#e5ecf4" stroke-width="16"/><path d="${fg}" fill="none" stroke="url(#grad)" stroke-width="16" stroke-linecap="round"/><defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#1f66ff"/><stop offset="100%" stop-color="#18a999"/></linearGradient></defs><text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="28" font-weight="700" fill="#0a122a">${pct}%</text>`;
+      const rsvg=document.getElementById('radar'), L=(data.dimensions&&data.dimensions.labels)||[], V=(data.dimensions&&data.dimensions.values)||[], R=90,CX=110,CY=110,N=L.length||6;
+      const ring=(k)=>`<circle cx="${CX}" cy="${CY}" r="${(R/5)*k}" fill="none" stroke="#e5ecf4" stroke-width="1"/>`; let grid=Array.from({length:5},(_,i)=>ring(i+1)).join('');
+      for(let i=0;i<N;i++){const a=-Math.PI/2+i*(2*Math.PI/N); grid+=`<line x1="${CX}" y1="${CY}" x2="${CX+90*Math.cos(a)}" y2="${CY+90*Math.sin(a)}" stroke="#e5ecf4" stroke-width="1"/>`;}
+      const pts=V.map((v,i)=>{const a=-Math.PI/2+i*(2*Math.PI/N), rr=(Math.max(0,Math.min(5,parseFloat(v)||0))/5)*90; return `${CX+rr*Math.cos(a)},${CY+rr*Math.sin(a)}`}).join(' ');
+      let lbl=''; for(let i=0;i<N;i++){const a=-Math.PI/2+i*(2*Math.PI/N),x=CX+(90+12)*Math.cos(a),y=CY+(90+12)*Math.sin(a); lbl+=`<text x="${x}" y="${y}" font-size="9" text-anchor="middle" fill="#5b6b7a">${L[i]||''}</text>`;}
+      rsvg.innerHTML=`${grid}<polygon points="${pts}" fill="rgba(31,102,255,0.18)" stroke="#1f66ff" stroke-width="2"/>${lbl}`;
     })();
   </script>
 </body>
