@@ -64,6 +64,11 @@
     /* Funding badges */
     .funding-badges{margin-top:.5rem;display:flex;flex-wrap:wrap;gap:6px}
     .funding-badge{padding:4px 8px;border-radius:8px;background:var(--brand-blue);color:#fff;font-size:10px;white-space:nowrap}
+
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; }
+a { word-break: break-word; }
+
   </style>
 </head>
 <body>
@@ -73,7 +78,7 @@
       <div>
         <h1>KI-Readiness-Report 2025</h1>
         <div class="meta">
-          <div>Datum: {{ datum }}</div><div>Sprache: DE</div><div>Score: <b>{{ "%d"|format(score_percent) }}%</b></div>
+          <div>Datum: {{ datum }}</div><div>Sprache: DE</div>
         </div>
       </div>
       <div class="badge">{% if badge_ready %}<img src="{{ badge_ready }}" alt="Badge" style="height:38px">{% endif %}</div>
@@ -84,10 +89,7 @@
     <!-- Cover mit großem Gauge -->
     <div class="card">
       <h2>Ihr KI-Readiness-Überblick</h2>
-      <div class="svgbox" style="margin-top:8px">
-        <svg id="gauge" viewBox="0 0 200 120" width="100%" height="140"></svg>
-        <div class="caption">Gesamt-Score (0–100)</div>
-      </div>
+     
       {% if preface %}<div style="margin-top:.6rem">{{ preface|safe }}</div>{% endif %}
       {% if kpis and kpis|length > 0 %}
         <div class="kpi-grid">
@@ -272,15 +274,6 @@
   <script>
     (function(){
       const data = ({{ chart_data_json | safe }}) || { score: 0, dimensions: { labels: [], values: [] } };
-
-      // Gauge (Cover)
-      const g = document.getElementById('gauge');
-      const pct = Math.max(0, Math.min(100, parseInt(data.score||0)));
-      const cx=100, cy=100, r=90, toXY=(ang)=>[cx+r*Math.cos(ang), cy+r*Math.sin(ang)];
-      const bg=`M ${toXY(Math.PI).join(' ')} A ${r} ${r} 0 0 1 ${toXY(0).join(' ')}`;
-      const ang=Math.PI*(1-pct/100), arc=(pct>50)?1:0;
-      const fg=`M ${toXY(Math.PI).join(' ')} A ${r} ${r} 0 ${arc} 1 ${toXY(ang).join(' ')}`;
-      g.innerHTML=`<path d="${bg}" fill="none" stroke="#e5ecf4" stroke-width="16"/><path d="${fg}" fill="none" stroke="url(#grad)" stroke-width="16" stroke-linecap="round"/><defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#1f66ff"/><stop offset="100%" stop-color="#18a999"/></linearGradient></defs><text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="28" font-weight="700" fill="#0a122a">${pct}%</text>`;
 
       // Radar (One-Pager)
       const rsvg=document.getElementById('radar'), L=(data.dimensions&&data.dimensions.labels)||[], V=(data.dimensions&&data.dimensions.values)||[], R=90,CX=110,CY=110,N=L.length||6;
