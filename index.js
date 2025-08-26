@@ -23,9 +23,13 @@ function _bool(env, def = false) {
   return def;
 }
 
+// ASCII-Sanitizer: entfernt Nicht-ASCII (z. B. für SendGrid-Header)
+const ascii = (s) => (s || "").normalize("NFKD").replace(/[^\x00-\x7F]/g, "");
+
 // ------------------------- SMTP -----------------------------
 function makeTransport({ alternate = false } = {}) {
-  const wantSecure = _bool(process.env.SMTP_SECURE, true);
+  // Standard: STARTTLS (587). Alternate probiert implicit TLS (465).
+  const wantSecure = _bool(process.env.SMTP_SECURE, false);
   const wantPort = parseInt(process.env.SMTP_PORT || (wantSecure ? "465" : "587"), 10);
 
   const secure = alternate ? !wantSecure : wantSecure;
@@ -86,9 +90,9 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
       tasks.push(
         t.sendMail({
           from, replyTo, to: adminEmail,
-          subject: "KI-Readiness Report erzeugt",
-          text: "Neuer Report wurde erstellt.",
-          attachments: [{ filename, content: pdfBuffer, contentType: "application/pdf" }],
+          subject: ascii("KI-Readiness Report erzeugt"),
+          text: ascii("Neuer Report wurde erstellt."),
+          attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
         }).then(() => (meta.admin = "ok"))
          .catch((err) => { meta.admin = "fail"; throw err; })
       );
@@ -97,9 +101,9 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
       tasks.push(
         t.sendMail({
           from, replyTo, to,
-          subject,
-          text,
-          attachments: [{ filename, content: pdfBuffer, contentType: "application/pdf" }],
+          subject: ascii(subject || "Ihr KI-Readiness-Report"),
+          text: ascii(text || "Ihr Report ist angehängt."),
+          attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
         }).then(() => (meta.user = "ok"))
          .catch((err) => { meta.user = "fail"; throw err; })
       );
@@ -107,7 +111,7 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
     await Promise.all(tasks.map(p => p.catch(e => { throw e; })));
   }
 
-  // 1) Primär
+  // 1) Primär (587/STARTTLS)
   try {
     meta.attempt = 1;
     const t1 = makeTransport();
@@ -134,12 +138,19 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
     }
   }
 
-  // 3) SendGrid-Fallback
+  // 3) SendGrid-Fallback (ASCII-sicher)
   if (process.env.SENDGRID_API_KEY) {
     try {
       meta.engine = "sendgrid";
       meta.attempt = meta.attempt ? meta.attempt + 1 : 1;
-      const ok = await sendViaSendgrid({ to, subject, text, pdfBuffer, filename, adminEmail: process.env.ADMIN_EMAIL || "" });
+      const ok = await sendViaSendgrid({
+        to,
+        subject: ascii(subject || "KI Readiness Report"),
+        text: ascii(text || "Ihr Report ist angehängt."),
+        pdfBuffer,
+        filename: ascii(filename || "KI-Readiness-Report.pdf"),
+        adminEmail: process.env.ADMIN_EMAIL || ""
+      });
       if (ok) {
         if (process.env.ADMIN_EMAIL) meta.admin = "ok";
         if (to) meta.user = "ok";
@@ -156,6 +167,8 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
 async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filename }) {
   const key = process.env.SENDGRID_API_KEY;
   if (!key) return false;
+
+  // Nur E-Mail als From (ohne Display-Name!)
   const from = process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || "pdf@localhost";
 
   const personalizations = [];
@@ -166,9 +179,14 @@ async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filen
   const payload = {
     personalizations,
     from: { email: from },
-    subject,
-    content: [{ type: "text/plain", value: text || "Ihr Report ist angehängt." }],
-    attachments: [{ content: pdfBuffer.toString("base64"), filename, type: "application/pdf", disposition: "attachment" }],
+    subject: ascii(subject || "KI Readiness Report"),
+    content: [{ type: "text/plain", value: ascii(text || "Ihr Report ist angehängt.") }],
+    attachments: [{
+      content: pdfBuffer.toString("base64"),
+      filename: ascii(filename || "KI-Readiness-Report.pdf"),
+      type: "application/pdf",
+      disposition: "attachment"
+    }],
   };
 
   const resp = await fetch("https://api.sendgrid.com/v3/mail/send", {
@@ -308,7 +326,7 @@ app.post("/generate-pdf", async (req, res) => {
     res.setHeader("X-Email-Admin", "queued");
     res.setHeader("X-Email-User", userEmail ? "queued" : "skip");
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", "inline; filename=KI-Readiness-Report.pdf");
+    res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Readiness-Report.pdf")}`);
     // Antwort JETZT senden
     res.status(200).send(pdfBuffer);
 
@@ -335,7 +353,7 @@ app.post("/generate-pdf", async (req, res) => {
   res.setHeader("X-Email-Admin", mailMeta.admin || "skip");
   res.setHeader("X-Email-User", mailMeta.user || "skip");
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", "inline; filename=KI-Readiness-Report.pdf");
+  res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Readiness-Report.pdf")}`);
   return res.status(200).send(pdfBuffer);
 });
 
