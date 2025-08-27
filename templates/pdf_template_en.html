@@ -18,16 +18,18 @@ var(--border);padding-bottom:.35rem;margin-top:1.2rem}
         ul,ol{margin:.4rem 0 .6rem 1.2rem} a{color:var(--brand-blue);text-
 decoration:none;border-bottom:1px solid rgba(31,102,255,.35)}
         .container{padding:22px}
-.header{display:flex;align-items:center;justify-content:space-between;background:var(--card);color:var(--ink);border-bottom:2px solid var(--brand-blue)}
+        .header{display:flex;align-items:center;justify-content:space-
+between;background:linear-gradient(90deg,var(--brand-blue),var(--brand-
+green));color:#fff;border-bottom:4px solid #0b3dd6}
         .header .inner{display:flex;gap:16px;align-items:center;padding:14px 
 22px}
         .header img{height:38px}
         .badge{margin-left:auto;opacity:.95}
-.meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+        .meta{display:flex;gap:18px;flex-wrap:wrap;color:#fff;font-size:12px}
         .card{background:var(--card);border:1px solid var(--border);border-
 radius:14px;padding:16px}
         .grid{display:grid;gap:14px}
-.grid.cols-2{grid-template-columns:1fr}
+        .grid.cols-2{grid-template-columns:1fr 1fr}
         .footer{margin-top:18px;padding-top:8px;border-top:1px dashed 
 var(--border);font-size:12px;color:#6b7280}
         table{width:100%;border-collapse:collapse;margin:.4rem 0}
@@ -121,42 +123,46 @@ alt="Badge" style="height:38px">{% endif %}</div>
           </div>
         {% endif %}
 
-        {% if exec_summary_html and exec_summary_html|trim %}
-        <div class="card section">
-          <h2>Executive summary</h2>
-          <div>{{ exec_summary_html|safe }}</div>
-        </div>
-        {% endif %}
-        {% if benchmarks and benchmarks.items()|length > 0 %}
-        <div class="card section">
-          <h2>Dimensions</h2>
-          <div class="benchmark-bars">
-            {% for key, b in benchmarks.items() %}
-              <div class="benchmark-row">
-                <div class="benchmark-label">{{ key }}</div>
-                <div class="benchmark-bar">
-                  <span class="you" style="width:{{ b.self }}%"></span>
-                  <span class="avg" style="left:{{ b.industry }}%"></span>
+        <div class="grid cols-2 onepager">
+          {% if exec_summary_html and exec_summary_html|trim %}
+          <div class="card"><h2>Executive summary</h2><div>{{ 
+exec_summary_html|safe }}</div></div>
+          {% endif %}
+          <div class="card">
+            <h2>Dimensions</h2>
+            <div class="svgbox">
+              <svg id="radar" viewBox="0 0 220 220" width="100%" 
+height="220"></svg>
+              <div class="caption">Digitalisation · Automation · Paperless · AI 
+know-how · …</div>
+            </div>
+            {% if benchmarks and benchmarks.items()|length > 0 %}
+            <div class="benchmark-bars">
+              {% for key, b in benchmarks.items() %}
+                <div class="benchmark-row">
+                  <div class="benchmark-label">{{ key }}</div>
+                  <div class="benchmark-bar">
+                    <span class="you" style="width:{{ b.self }}%"></span>
+                    <span class="avg" style="left:{{ b.industry }}%"></span>
+                  </div>
                 </div>
-              </div>
-            {% endfor %}
-            <div class="caption" style="font-size:10px;margin-top:.25rem">Bars: your value (blue), sector benchmark (green)</div>
+              {% endfor %}
+              <div class="caption" style="font-size:10px;margin-
+top:.25rem">Bars: your value (blue), sector benchmark (green)</div>
+            </div>
+            {% endif %}
           </div>
         </div>
-        {% endif %}
 
-{% if quick_wins_html and quick_wins_html|trim %}
-        <div class="card section">
-          <h2>⚡ Quick wins</h2>
-          <div>{{ quick_wins_html|safe }}</div>
+        {% if (quick_wins_html and quick_wins_html|trim) or (risks_html and 
+risks_html|trim) %}
+        <div class="grid cols-2 section">
+          <div class="card"><h2>⚡ Quick wins</h2><div>{{ (quick_wins_html or 
+ '')|safe }}</div></div>
+          <div class="card"><h2>⚠️ Key risks</h2><div>{{ (risks_html or '')|safe
+  }}</div></div>
         </div>
-{% endif %}
-{% if risks_html and risks_html|trim %}
-        <div class="card section">
-          <h2>⚠️ Key risks</h2>
-          <div>{{ risks_html|safe }}</div>
-        </div>
-{% endif %}
+        {% endif %}
         <div class="grid cols-2 section">
           {% if recommendations_html and recommendations_html|trim %}
             <div class="card"><h2>Recommendations (Top 5) </h2><div>{{ 
@@ -302,6 +308,33 @@ Hohl</span>
     </div>
       </div>
 
-      <!-- Charts removed: Radar diagram is no longer rendered in the Gold Standard -->
+      <!-- Charts (offline SVG) -->
+      <script>
+        (function(){
+          const data = ({{ chart_data_json | safe }}) || { score: 0, dimensions:
+  { labels: [], values: [] } };
+
+          // Radar (One-pager)
+          const rsvg=document.getElementById('radar'), 
+L=(data.dimensions&&data.dimensions.labels)||[], 
+V=(data.dimensions&&data.dimensions.values)||[], 
+R=90,CX=110,CY=110,N=L.length||6;
+          const ring=(k)=>`<circle cx="${CX}" cy="${CY}" r="${(R/5)*k}" 
+fill="none" stroke="#e5ecf4" stroke-width="1"/>`; let 
+grid=Array.from({length:5},(_,i)=>ring(i+1)).join('');
+          for(let i=0;i<N;i++){const a=-Math.PI/2+i*(2*Math.PI/N); grid+=`<line 
+x1="${CX}" y1="${CY}" x2="${CX+90*Math.cos(a)}" y2="${CY+90*Math.sin(a)}" 
+stroke="#e5ecf4" stroke-width="1"/>`;}
+          const pts=V.map((v,i)=>{const a=-Math.PI/2+i*(2*Math.PI/N), 
+rr=(Math.max(0,Math.min(5,parseFloat(v)||0))/5)*90; return 
+`${CX+rr*Math.cos(a)},${CY+rr*Math.sin(a)}`}).join(' ');
+          let lbl=''; for(let i=0;i<N;i++){const 
+a=-Math.PI/2+i*(2*Math.PI/N),x=CX+(90+12)*Math.cos(a),y=CY+(90+12)*Math.sin(a); 
+lbl+=`<text x="${x}" y="${y}" font-size="9" text-anchor="middle" 
+fill="#5b6b7a">${L[i]||''}</text>`;}
+          rsvg.innerHTML=`${grid}<polygon points="${pts}" 
+fill="rgba(31,102,255,0.18)" stroke="#1f66ff" stroke-width="2"/>${lbl}`;
+        })();
+      </script>
     </body>
     </html>
