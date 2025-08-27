@@ -66,6 +66,8 @@ radius:4px;position:relative}
         .benchmark-bar span.you{display:block;height:8px;background:var(--brand-
 blue);border-radius:4px}
         .benchmark-bar span.avg{position:absolute;top:-
+        /* ensure the bar spans the full width so own-value bars are visible */
+        .benchmark-bar{width:100%}
 3px;width:2px;height:14px;background:var(--brand-green)}
         /* Risk heatmap */
         .risk-table{width:100%;border-collapse:collapse;margin-top:.6rem;font-
@@ -309,6 +311,33 @@ Hohl</span>
     </div>
       </div>
 
-      <!-- Charts removed in Gold-Standard -->
+      <!-- Charts (offline SVG) -->
+      <script>
+        (function(){
+          const data = ({{ chart_data_json | safe }}) || { score: 0, dimensions:
+  { labels: [], values: [] } };
+
+          // Radar (One-pager)
+          const rsvg=document.getElementById('radar'), 
+L=(data.dimensions&&data.dimensions.labels)||[], 
+V=(data.dimensions&&data.dimensions.values)||[], 
+R=90,CX=110,CY=110,N=L.length||6;
+          const ring=(k)=>`<circle cx="${CX}" cy="${CY}" r="${(R/5)*k}" 
+fill="none" stroke="#e5ecf4" stroke-width="1"/>`; let 
+grid=Array.from({length:5},(_,i)=>ring(i+1)).join('');
+          for(let i=0;i<N;i++){const a=-Math.PI/2+i*(2*Math.PI/N); grid+=`<line 
+x1="${CX}" y1="${CY}" x2="${CX+90*Math.cos(a)}" y2="${CY+90*Math.sin(a)}" 
+stroke="#e5ecf4" stroke-width="1"/>`;}
+          const pts=V.map((v,i)=>{const a=-Math.PI/2+i*(2*Math.PI/N), 
+rr=(Math.max(0,Math.min(5,parseFloat(v)||0))/5)*90; return 
+`${CX+rr*Math.cos(a)},${CY+rr*Math.sin(a)}`}).join(' ');
+          let lbl=''; for(let i=0;i<N;i++){const 
+a=-Math.PI/2+i*(2*Math.PI/N),x=CX+(90+12)*Math.cos(a),y=CY+(90+12)*Math.sin(a); 
+lbl+=`<text x="${x}" y="${y}" font-size="9" text-anchor="middle" 
+fill="#5b6b7a">${L[i]||''}</text>`;}
+          rsvg.innerHTML=`${grid}<polygon points="${pts}" 
+fill="rgba(31,102,255,0.18)" stroke="#1f66ff" stroke-width="2"/>${lbl}`;
+        })();
+      </script>
     </body>
     </html>
