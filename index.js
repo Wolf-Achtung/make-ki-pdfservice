@@ -171,6 +171,10 @@ async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filen
   // Nur E-Mail als From (ohne Display-Name!)
   const from = process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || "pdf@localhost";
 
+  // sanitize from-address to avoid non-ASCII characters in SendGrid payload
+  const sanitizedFrom = ascii(from);
+
+
   const personalizations = [];
   if (adminEmail) personalizations.push({ to: [{ email: adminEmail }] });
   if (to) personalizations.push({ to: [{ email: to }] });
@@ -178,7 +182,7 @@ async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filen
 
   const payload = {
     personalizations,
-    from: { email: from },
+    from: { email: sanitizedFrom },
     subject: ascii(subject || "KI Readiness Report"),
     content: [{ type: "text/plain", value: ascii(text || "Ihr Report ist angehängt.") }],
     attachments: [{
