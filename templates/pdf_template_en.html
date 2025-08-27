@@ -29,7 +29,8 @@ green));color:#fff;border-bottom:4px solid #0b3dd6}
         .card{background:var(--card);border:1px solid var(--border);border-
 radius:14px;padding:16px}
         .grid{display:grid;gap:14px}
-        .grid.cols-2{grid-template-columns:1fr 1fr}
+        /* Force two-column grids to a single column for improved readability */
+        .grid.cols-2{grid-template-columns:1fr}
         .footer{margin-top:18px;padding-top:8px;border-top:1px dashed 
 var(--border);font-size:12px;color:#6b7280}
         table{width:100%;border-collapse:collapse;margin:.4rem 0}
@@ -37,7 +38,7 @@ var(--border);font-size:12px;color:#6b7280}
 align:left;vertical-align:top}
         th{background:var(--brand-blue);color:#fff}
         .svgbox{background:var(--card);border:1px solid var(--border);border-
-radius:14px;padding:10px}
+radius:14px;padding:10px;display:none}
         .caption{font-size:12px;color:#6b7280;margin-top:.25rem}
         .toc-card{background:var(--card);border:1px dashed var(--border);border-
 radius:14px;padding:14px}

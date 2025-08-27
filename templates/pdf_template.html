@@ -32,7 +32,8 @@ green));color:#fff;border-bottom:4px solid #0b3dd6}
         .card{background:var(--card);border:1px solid var(--border);border-
 radius:14px;padding:16px}
         .grid{display:grid;gap:14px}
-        .grid.cols-2{grid-template-columns:1fr 1fr}
+        /* Force two-column grids to a single column for improved readability */
+        .grid.cols-2{grid-template-columns:1fr}
         .footer{margin-top:18px;padding-top:8px;border-top:1px dashed 
 var(--border);font-size:12px;color:var(--muted)}
         table{width:100%;border-collapse:collapse;margin:.4rem 0}
@@ -137,7 +138,7 @@ alt="Badge" style="height:38px">{% endif %}</div>
         {% endif %}
 
         <!-- One-Pager: Executive & Radar -->
-        <div class="grid cols-2 onepager">
+        <div class="section">
           {% if exec_summary_html and exec_summary_html|trim %}
           <div class="card">
             <h2>Executive Summary</h2>
@@ -146,12 +147,7 @@ alt="Badge" style="height:38px">{% endif %}</div>
           {% endif %}
           <div class="card">
             <h2>Dimensionen</h2>
-            <div class="svgbox">
-              <svg id="radar" viewBox="0 0 220 220" width="100%" 
-height="220"></svg>
-              <div class="caption">Digitalisierung · Automatisierung · Papierlos
- · Know-how · …</div>
-            </div>
+            {# Radar chart removed in Gold-Standard #}
             {% if benchmarks and benchmarks.items()|length > 0 %}
             <div class="benchmark-bars">
               {% for key, b in benchmarks.items() %}
@@ -170,18 +166,17 @@ top:.25rem">Balken: Ihr Wert (blau), Branchen-Benchmark (grün)</div>
           </div>
         </div>
 
-        <!-- Quick Wins & Risiken im 2-Spalten-Block -->
-        {% if (quick_wins_html and quick_wins_html|trim) or (risks_html and 
-risks_html|trim) %}
-        <div class="grid cols-2 section">
-          <div class="card">
-            <h2>⚡ Quick Wins</h2>
-            <div>{{ (quick_wins_html or '')|safe }}</div>
-          </div>
-          <div class="card">
-            <h2>⚠️ Hauptrisiken</h2>
-            <div>{{ (risks_html or '')|safe }}</div>
-          </div>
+        <!-- Quick Wins & Hauptrisiken -->
+        {% if quick_wins_html and quick_wins_html|trim %}
+        <div class="card section">
+          <h2>⚡ Quick Wins</h2>
+          <div>{{ quick_wins_html|safe }}</div>
+        </div>
+        {% endif %}
+        {% if risks_html and risks_html|trim %}
+        <div class="card section">
+          <h2>⚠️ Hauptrisiken</h2>
+          <div>{{ risks_html|safe }}</div>
         </div>
         {% endif %}
         <!-- Empfehlungen & Roadmap -->
@@ -247,8 +242,7 @@ endif %}</td></tr>
             <h2>KI-Tools & Software</h2>
             {% if tools_table and tools_table|length>0 %}
               <table>
-                <thead><tr><th>Tool</th><th>Einsatz</th><th>Kosten</th><th>Link<
-/th></tr></thead>
+                <thead><tr><th>Tool</th><th>Einsatz</th><th>Kosten</th><th>Link</th></tr></thead>
                 <tbody>
                 {% for t in tools_table %}
                   <tr><td>{{ t.name }}</td><td>{{ t.usecase }}</td><td>{{ t.cost
