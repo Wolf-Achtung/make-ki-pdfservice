@@ -237,8 +237,7 @@ endif %}</td></tr>
             <h2>KI-Tools & Software</h2>
             {% if tools_table and tools_table|length>0 %}
               <table>
-                <thead><tr><th>Tool</th><th>Einsatz</th><th>Kosten</th><th>Link<
-/th></tr></thead>
+                <thead><tr><th>Tool</th><th>Einsatz</th><th>Kosten</th><th>Link</th></tr></thead>
                 <tbody>
                 {% for t in tools_table %}
                   <tr><td>{{ t.name }}</td><td>{{ t.usecase }}</td><td>{{ t.cost
