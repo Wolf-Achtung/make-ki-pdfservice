@@ -75,7 +75,7 @@ async function verifySmtp(transporter) {
   }
 }
 
-async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readiness-Report.pdf" }) {
+async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Status-Report.pdf" }) {
   const emailEnabled = !_bool(process.env.EMAIL_ENABLED, true) ? false : true;
   let meta = { admin: "skip", user: "skip", engine: "smtp", attempt: 0, alternateTried: false };
   if (!emailEnabled) return meta;
@@ -90,7 +90,7 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
       tasks.push(
         t.sendMail({
           from, replyTo, to: adminEmail,
-          subject: ascii("KI-Readiness Report erzeugt"),
+          subject: ascii("KI-Status Report erzeugt"),
           text: ascii("Neuer Report wurde erstellt."),
           attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
         }).then(() => (meta.admin = "ok"))
@@ -101,7 +101,7 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
       tasks.push(
         t.sendMail({
           from, replyTo, to,
-          subject: ascii(subject || "Ihr KI-Readiness-Report"),
+          subject: ascii(subject || "Ihr KI-Status-Report"),
           text: ascii(text || "Ihr Report ist angehängt."),
           attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
         }).then(() => (meta.user = "ok"))
@@ -145,10 +145,10 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Readi
       meta.attempt = meta.attempt ? meta.attempt + 1 : 1;
       const ok = await sendViaSendgrid({
         to,
-        subject: ascii(subject || "KI Readiness Report"),
+        subject: ascii(subject || "KI Status Report"),
         text: ascii(text || "Ihr Report ist angehängt."),
         pdfBuffer,
-        filename: ascii(filename || "KI-Readiness-Report.pdf"),
+        filename: ascii(filename || "KI-Status-Report.pdf"),
         adminEmail: process.env.ADMIN_EMAIL || ""
       });
       if (ok) {
@@ -183,11 +183,11 @@ async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filen
   const payload = {
     personalizations,
     from: { email: sanitizedFrom },
-    subject: ascii(subject || "KI Readiness Report"),
+    subject: ascii(subject || "KI Status Report"),
     content: [{ type: "text/plain", value: ascii(text || "Ihr Report ist angehängt.") }],
     attachments: [{
       content: pdfBuffer.toString("base64"),
-      filename: ascii(filename || "KI-Readiness-Report.pdf"),
+      filename: ascii(filename || "KI-Status-Report.pdf"),
       type: "application/pdf",
       disposition: "attachment"
     }],
@@ -288,7 +288,7 @@ app.post("/generate-pdf", async (req, res) => {
   const wantAsyncMail = (String(process.env.EMAIL_ASYNC || "true").toLowerCase() !== "false");
 
   let userEmail = req.get("X-User-Email") || "";
-  let subject = req.get("X-Subject") || process.env.SUBJECT || "Ihr KI-Readiness-Report";
+  let subject = req.get("X-Subject") || process.env.SUBJECT || "Ihr KI-Status-Report";
   const reqLang = (req.get("X-Lang") || "").toLowerCase();
 
   // Body lesen
@@ -321,7 +321,7 @@ app.post("/generate-pdf", async (req, res) => {
   // --- ASYNC MAIL: PDF sofort senden, Mail im Hintergrund ---
   const txt = reqLang === "en"
     ? "Thank you. Your individual AI Readiness report is attached."
-    : "Vielen Dank. Anbei Ihr individueller KI-Readiness-Report.";
+    : "Vielen Dank. Anbei Ihr individueller KI‑Status‑Report.";
 
   res.setHeader("X-Mail-Mode", wantAsyncMail ? "async" : "sync");
   res.setHeader("X-Mail-Engine", process.env.SENDGRID_API_KEY ? "sendgrid-or-smtp" : "smtp");
@@ -330,14 +330,14 @@ app.post("/generate-pdf", async (req, res) => {
     res.setHeader("X-Email-Admin", "queued");
     res.setHeader("X-Email-User", userEmail ? "queued" : "skip");
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Readiness-Report.pdf")}`);
+    res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Status-Report.pdf")}`);
     // Antwort JETZT senden
     res.status(200).send(pdfBuffer);
 
     // Mailversand „fire-and-forget“
     setTimeout(async () => {
       try {
-        await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Readiness-Report.pdf" });
+        await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Status-Report.pdf" });
       } catch (e) {
         console.error("[PDFSERVICE] async mail error:", e?.message || e);
       }
@@ -349,7 +349,7 @@ app.post("/generate-pdf", async (req, res) => {
   // --- SYNC MAIL (nur wenn EMAIL_ASYNC=false explizit gesetzt) ---
   let mailMeta = { admin: "skip", user: "skip" };
   try {
-    mailMeta = await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Readiness-Report.pdf" });
+    mailMeta = await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Status-Report.pdf" });
   } catch (e) {
     console.error("[PDFSERVICE] mail pipeline error:", e?.message || e);
   }
@@ -357,7 +357,7 @@ app.post("/generate-pdf", async (req, res) => {
   res.setHeader("X-Email-Admin", mailMeta.admin || "skip");
   res.setHeader("X-Email-User", mailMeta.user || "skip");
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Readiness-Report.pdf")}`);
+  res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Status-Report.pdf")}`);
   return res.status(200).send(pdfBuffer);
 });
 
