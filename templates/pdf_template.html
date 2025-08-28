@@ -3,7 +3,7 @@
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>KI-Readiness-Report</title>
+      <title>KI-Status-Report</title>
       <style>
         :root{
           --brand-blue:#1f66ff; --brand-green:#18a999; --ink:#0a122a; 
@@ -72,13 +72,10 @@ bottom:2px}
 size:12px}
         .benchmark-label{width:90px;color:var(--muted);font-weight:500}
         .benchmark-bar{flex:1;height:8px;background:#e5ecf4;border-
-radius:4px;position:relative}
+radius:4px;position:relative;width:100%}
         .benchmark-bar span.you{display:block;height:8px;background:var(--brand-
 blue);border-radius:4px}
-        .benchmark-bar span.avg{position:absolute;top:-
-        /* ensure the bar spans the full width so own-value bars are visible */
-        .benchmark-bar{width:100%}
-3px;width:2px;height:14px;background:var(--brand-green)}
+        .benchmark-bar span.avg{position:absolute;top:-3px;width:2px;height:14px;background:var(--brand-green)}
         /* Risk heatmap */
         .risk-table{width:100%;border-collapse:collapse;margin-top:.6rem;font-
 size:12px}
@@ -105,7 +102,7 @@ blue);color:#fff;font-size:10px;white-space:nowrap}
           {% if logo_main %}<img src="{{ logo_main }}" alt="KI-Sicherheit" />{% 
 endif %}
           <div>
-            <h1>KI-Readiness-Report 2025</h1>
+            <h1>KI-Status-Report 2025</h1>
             <div class="meta">
               <div>Datum: {{ datum }}</div><div>Sprache: DE</div>
             </div>
@@ -118,7 +115,7 @@ alt="Badge" style="height:38px">{% endif %}</div>
       <div class="container">
         <!-- Cover mit großem Gauge -->
         <div class="card">
-          <h2>Ihr KI-Readiness-Überblick</h2>
+          <h2>Ihr KI-Status-Überblick</h2>
 
           {% if preface %}<div style="margin-top:.6rem">{{ preface|safe 
 }}</div>{% endif %}
