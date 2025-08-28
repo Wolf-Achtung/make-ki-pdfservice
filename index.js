@@ -321,7 +321,7 @@ app.post("/generate-pdf", async (req, res) => {
   // --- ASYNC MAIL: PDF sofort senden, Mail im Hintergrund ---
   const txt = reqLang === "en"
     ? "Thank you. Your individual AI Readiness report is attached."
-    : "Vielen Dank. Anbei Ihr individueller KI‑Status‑Report.";
+    : "Vielen Dank. Anbei Ihr individueller KI Status Report.";
 
   res.setHeader("X-Mail-Mode", wantAsyncMail ? "async" : "sync");
   res.setHeader("X-Mail-Engine", process.env.SENDGRID_API_KEY ? "sendgrid-or-smtp" : "smtp");
