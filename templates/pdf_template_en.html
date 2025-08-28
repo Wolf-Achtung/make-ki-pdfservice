@@ -18,19 +18,16 @@ var(--border);padding-bottom:.35rem;margin-top:1.2rem}
         ul,ol{margin:.4rem 0 .6rem 1.2rem} a{color:var(--brand-blue);text-
 decoration:none;border-bottom:1px solid rgba(31,102,255,.35)}
         .container{padding:22px}
-        .header{display:flex;align-items:center;justify-content:space-
-between;background:linear-gradient(90deg,var(--brand-blue),var(--brand-
-green));color:#fff;border-bottom:4px solid #0b3dd6}
+.header{display:flex;align-items:center;justify-content:space-between;background:var(--card);color:var(--ink);border-bottom:2px solid var(--brand-blue)}
         .header .inner{display:flex;gap:16px;align-items:center;padding:14px 
 22px}
         .header img{height:38px}
         .badge{margin-left:auto;opacity:.95}
-        .meta{display:flex;gap:18px;flex-wrap:wrap;color:#fff;font-size:12px}
+.meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:12px}
         .card{background:var(--card);border:1px solid var(--border);border-
 radius:14px;padding:16px}
         .grid{display:grid;gap:14px}
-        /* Force two-column grids to a single column for improved readability */
-        .grid.cols-2{grid-template-columns:1fr}
+.grid.cols-2{grid-template-columns:1fr}
         .footer{margin-top:18px;padding-top:8px;border-top:1px dashed 
 var(--border);font-size:12px;color:#6b7280}
         table{width:100%;border-collapse:collapse;margin:.4rem 0}
@@ -38,7 +35,7 @@ var(--border);font-size:12px;color:#6b7280}
 align:left;vertical-align:top}
         th{background:var(--brand-blue);color:#fff}
         .svgbox{background:var(--card);border:1px solid var(--border);border-
-radius:14px;padding:10px;display:none}
+radius:14px;padding:10px}
         .caption{font-size:12px;color:#6b7280;margin-top:.25rem}
         .toc-card{background:var(--card);border:1px dashed var(--border);border-
 radius:14px;padding:14px}
@@ -62,10 +59,11 @@ radius:12px;padding:10px;text-align:center}
 size:12px}
         .benchmark-label{width:90px;color:#6b7280;font-weight:500}
         .benchmark-bar{flex:1;height:8px;background:#e5ecf4;border-
-radius:4px;position:relative;width:100%}
+radius:4px;position:relative}
         .benchmark-bar span.you{display:block;height:8px;background:var(--brand-
 blue);border-radius:4px}
-        .benchmark-bar span.avg{position:absolute;top:-3px;width:2px;height:14px;background:var(--brand-green)}
+        .benchmark-bar span.avg{position:absolute;top:-
+3px;width:2px;height:14px;background:var(--brand-green)}
         /* Risk heatmap */
         .risk-table{width:100%;border-collapse:collapse;margin-top:.6rem;font-
 size:12px}
@@ -130,12 +128,7 @@ exec_summary_html|safe }}</div></div>
           {% endif %}
           <div class="card">
             <h2>Dimensions</h2>
-            <div class="svgbox">
-              <svg id="radar" viewBox="0 0 220 220" width="100%" 
-height="220"></svg>
-              <div class="caption">Digitalisation · Automation · Paperless · AI 
-know-how · …</div>
-            </div>
+            {# Radar chart removed in the Gold-Standard.  Only bar charts are rendered below. #}
             {% if benchmarks and benchmarks.items()|length > 0 %}
             <div class="benchmark-bars">
               {% for key, b in benchmarks.items() %}
@@ -227,8 +220,7 @@ case</th><th>Cost</th><th>Link</th></tr></thead>
                 {% for t in tools_table %}
                   <tr><td>{{ t.name }}</td><td>{{ t.usecase }}</td><td>{{ t.cost
   }}</td>
-                    <td>{% if t.link %}<a href="{{ t.link }}">Details</a>{% 
- endif %}</td></tr>
+                    <td>{% if t.link %}<a href="{{ t.link }}">Link</a>{% endif %}</td></tr>
                 {% endfor %}
                 </tbody>
               </table>
@@ -309,7 +301,7 @@ Hohl</span>
       </div>
 
       <!-- Charts (offline SVG) -->
-      <script>
+      <!--
         (function(){
           const data = ({{ chart_data_json | safe }}) || { score: 0, dimensions:
   { labels: [], values: [] } };
@@ -335,6 +327,6 @@ fill="#5b6b7a">${L[i]||''}</text>`;}
           rsvg.innerHTML=`${grid}<polygon points="${pts}" 
 fill="rgba(31,102,255,0.18)" stroke="#1f66ff" stroke-width="2"/>${lbl}`;
         })();
-      </script>
+      -->
     </body>
     </html>
