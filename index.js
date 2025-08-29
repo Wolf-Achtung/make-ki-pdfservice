@@ -87,14 +87,33 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
   async function _trySend(t) {
     const tasks = [];
     if (adminEmail) {
+      // Include the recipient address in the admin mail so the admin knows which user the report belongs to.
+      const adminSubject = ascii(
+        `KI-Status Report für ${to || 'Unbekannt'}`
+      );
+      const adminText = ascii(
+        `Neuer Report wurde erstellt für ${to || 'Unbekannt'}.`
+      );
       tasks.push(
         t.sendMail({
-          from, replyTo, to: adminEmail,
-          subject: ascii("KI-Status Report erzeugt"),
-          text: ascii("Neuer Report wurde erstellt."),
-          attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
-        }).then(() => (meta.admin = "ok"))
-         .catch((err) => { meta.admin = "fail"; throw err; })
+          from,
+          replyTo,
+          to: adminEmail,
+          subject: adminSubject,
+          text: adminText,
+          attachments: [
+            {
+              filename: ascii(filename),
+              content: pdfBuffer,
+              contentType: "application/pdf",
+            },
+          ],
+        })
+          .then(() => (meta.admin = "ok"))
+          .catch((err) => {
+            meta.admin = "fail";
+            throw err;
+          })
       );
     }
     if (to) {
