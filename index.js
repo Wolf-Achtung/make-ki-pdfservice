@@ -1,8 +1,8 @@
-// index.js — Full PDF Service (optimized, hardened, compatible)
-// Preserves: SMTP/SendGrid, async mail, diagnostics (/health, /smtp/*, /env)
-// Adds: hardened puppeteer flags (--no-zygote, --single-process, etc.),
-//       HTML sanitizer (scripts + optional @page removal + size cap),
-//       dual response mode (PDF stream *or* JSON base64), robust content-type handling.
+// index.js — PDF Service (Gold-Standard, hardened, Admin+User Mail mit Reply-To)
+// - Dual: PDF stream ODER JSON base64 (RETURN_JSON_BASE64=1)
+// - Admin+User E-Mail; Reply-To = User-E-Mail (SMTP + SendGrid)
+// - Headless Chrome via puppeteer; kein harter Exec-Pfad; sichere Flags
+// - HTML-Sanitizer; @page optional stripbar; Größenlimit
 
 import express from "express";
 import cors from "cors";
@@ -12,7 +12,6 @@ import crypto from "crypto";
 import fs from "fs";
 import puppeteer from "puppeteer";
 
-// ------------------------- App & Middleware -------------------------
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -20,17 +19,15 @@ app.use(bodyParser.json({ limit: process.env.JSON_LIMIT || "10mb" }));
 app.use(bodyParser.text({ type: ["text/*", "application/xhtml+xml"], limit: process.env.HTML_LIMIT || "10mb" }));
 app.use(cors({ origin: "*" }));
 
-// ------------------------- Helpers -------------------------
 function _bool(env, def = false) {
   const v = String(env ?? "").trim().toLowerCase();
   if (v === "true" || v === "1") return true;
   if (v === "false" || v === "0") return false;
   return def;
 }
-
 const ascii = (s) => (s || "").normalize("NFKD").replace(/[^\x00-\x7F]/g, "");
 
-// Sanitizer for incoming HTML
+// --- Sanitizer ---
 function sanitizeHtml(input = "") {
   const stripScripts = _bool(process.env.PDF_STRIP_SCRIPTS, true);
   const stripPageAt = _bool(process.env.PDF_STRIP_PAGE_AT_RULES, true);
@@ -44,11 +41,10 @@ function sanitizeHtml(input = "") {
   return t;
 }
 
-// ------------------------- SMTP -----------------------------
+// --- SMTP helper ---
 function makeTransport({ alternate = false } = {}) {
   const wantSecure = _bool(process.env.SMTP_SECURE, false);
   const wantPort = parseInt(process.env.SMTP_PORT || (wantSecure ? "465" : "587"), 10);
-
   const secure = alternate ? !wantSecure : wantSecure;
   const port = alternate ? (wantSecure ? 587 : 465) : wantPort;
 
@@ -71,35 +67,26 @@ function makeTransport({ alternate = false } = {}) {
     host: process.env.SMTP_HOST,
     port,
     secure,
-    auth: process.env.SMTP_USER && process.env.SMTP_PASS ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-    pool: false,
+    auth: (process.env.SMTP_USER && process.env.SMTP_PASS) ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
     ...timeouts,
-    logger: _bool(process.env.SMTP_DEBUG),
-    debug: _bool(process.env.SMTP_DEBUG),
   });
 
-  transporter.__info = { host: process.env.SMTP_HOST, port, secure, ...timeouts };
   return transporter;
 }
-
-async function verifySmtp(transporter) {
-  try {
-    if (transporter.__stub) return { ok: true, stub: true };
-    await transporter.verify();
-    return { ok: true, info: transporter.__info };
-  } catch (e) {
-    return { ok: false, error: e?.message || String(e), info: transporter.__info };
-  }
+async function verifySmtp(t) {
+  try { await t.verify(); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e?.message || e) }; }
 }
 
-async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Status-Report.pdf" }) {
+// --- Mail: SMTP first, alt SMTP, dann SendGrid ---
+async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Status-Report.pdf", replyTo }) {
   const emailEnabled = !_bool(process.env.EMAIL_ENABLED, true) ? false : true;
   let meta = { admin: "skip", user: "skip", engine: "smtp", attempt: 0, alternateTried: false };
   if (!emailEnabled) return meta;
 
   const from = process.env.SMTP_FROM || process.env.SMTP_USER || "pdf@localhost";
-  const replyTo = process.env.SMTP_REPLY_TO || undefined;
   const adminEmail = process.env.ADMIN_EMAIL || "";
+  const reply_to = ascii(replyTo || process.env.SMTP_REPLY_TO || to || "");
 
   async function _trySend(t) {
     const tasks = [];
@@ -108,11 +95,8 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
       const adminText = ascii(`Neuer Report wurde erstellt für ${to || "Unbekannt"}.`);
       tasks.push(
         t.sendMail({
-          from,
-          replyTo,
-          to: adminEmail,
-          subject: adminSubject,
-          text: adminText,
+          from, replyTo: reply_to || undefined, to: adminEmail,
+          subject: adminSubject, text: adminText,
           attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
         }).then(() => (meta.admin = "ok")).catch((err) => { meta.admin = "fail"; throw err; })
       );
@@ -120,7 +104,7 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
     if (to) {
       tasks.push(
         t.sendMail({
-          from, replyTo, to,
+          from, replyTo: reply_to || undefined, to,
           subject: ascii(subject || "Ihr KI-Status-Report"),
           text: ascii(text || "Ihr Report ist angehängt."),
           attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
@@ -161,17 +145,14 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
       meta.attempt = meta.attempt ? meta.attempt + 1 : 1;
       const ok = await sendViaSendgrid({
         to,
+        adminEmail,
         subject: ascii(subject || "KI Status Report"),
         text: ascii(text || "Ihr Report ist angehängt."),
         pdfBuffer,
-        filename: ascii(filename || "KI-Status-Report.pdf"),
-        adminEmail: process.env.ADMIN_EMAIL || ""
+        filename,
+        replyTo: reply_to || undefined,
       });
-      if (ok) {
-        if (process.env.ADMIN_EMAIL) meta.admin = "ok";
-        if (to) meta.user = "ok";
-        return meta;
-      }
+      if (ok) { meta.user = to ? "ok" : "skip"; meta.admin = adminEmail ? "ok" : "skip"; return meta; }
     } catch (e3) {
       console.error("[PDFSERVICE] SendGrid error:", e3?.message || e3);
     }
@@ -179,21 +160,19 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
   return meta;
 }
 
-async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filename }) {
+async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filename, replyTo }) {
   const key = process.env.SENDGRID_API_KEY;
   if (!key) return false;
   const from = process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || "pdf@localhost";
-  const sanitizedFrom = ascii(from);
-  const personalizations = [];
-  if (adminEmail) personalizations.push({ to: [{ email: adminEmail }] });
-  if (to) personalizations.push({ to: [{ email: to }] });
-  if (!personalizations.length) return true;
-
   const payload = {
-    personalizations,
-    from: { email: sanitizedFrom },
+    personalizations: [
+      ...(adminEmail ? [{ to: [{ email: adminEmail }] }] : []),
+      ...(to ? [{ to: [{ email: to }] }] : []),
+    ],
+    from: { email: ascii(from) },
     subject: ascii(subject || "KI Status Report"),
     content: [{ type: "text/plain", value: ascii(text || "Ihr Report ist angehängt.") }],
+    ...(replyTo ? { reply_to: { email: ascii(replyTo) } } : {}),
     attachments: [{
       content: pdfBuffer.toString("base64"),
       filename: ascii(filename || "KI-Status-Report.pdf"),
@@ -208,52 +187,28 @@ async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filen
     body: JSON.stringify(payload),
   });
   if (resp.status === 202) return true;
-  const errText = await resp.text().catch(() => "");
-  console.error("[PDFSERVICE] SendGrid response:", resp.status, errText);
+  console.error("[PDFSERVICE] SendGrid response:", resp.status, await resp.text().catch(() => ""));
   return false;
 }
 
-// ------------------------- Puppeteer -------------------------------
+// --- Puppeteer ---
 function sanitizePuppeteerEnv() {
-  const removed = [];
-  for (const key of ["PUPPETEER_EXECUTABLE_PATH", "CHROME_PATH"]) {
-    const p = process.env[key];
-    if (p && !fs.existsSync(p)) {
-      removed.push({ [key]: p });
-      delete process.env[key];
-    }
-  }
-  if (removed.length) console.warn("[PDFSERVICE] removed invalid exec paths:", removed);
+  process.env.PUPPETEER_PRODUCT = "chrome";
+  process.env.PUPPETEER_EXECUTABLE_PATH = ""; // kein harter Pfad
+  process.env.XDG_RUNTIME_DIR = process.env.XDG_RUNTIME_DIR || "/tmp";
 }
-
 async function resolveChromePath() {
-  const envPath = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH;
-  if (envPath && fs.existsSync(envPath)) return envPath;
-  try {
-    const p = puppeteer.executablePath();
-    if (p && fs.existsSync(p)) return p;
-  } catch {}
-  const fallbacks = ["/usr/bin/chromium","/usr/bin/chromium-browser","/usr/bin/google-chrome","/usr/bin/google-chrome-stable"];
-  for (const p of fallbacks) if (fs.existsSync(p)) return p;
-  return null;
+  try { return (await import("puppeteer")).executablePath(); }
+  catch { return undefined; }
 }
-
 function launchArgs() {
   return [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-accelerated-2d-canvas",
-    "--disable-gpu",
-    "--disable-web-security",
-    // Hardened flags:
-    "--no-zygote",
-    "--single-process",
-    "--disable-software-rasterizer",
-    "--mute-audio",
+    "--no-sandbox", "--disable-setuid-sandbox",
+    "--no-zygote", "--single-process",
+    "--disable-dev-shm-usage", "--disable-gpu",
+    "--disable-software-rasterizer", "--mute-audio",
   ];
 }
-
 async function renderPdf(html) {
   sanitizePuppeteerEnv();
   const execPath = await resolveChromePath();
@@ -261,56 +216,32 @@ async function renderPdf(html) {
     headless: process.env.PUPPETEER_HEADLESS || "new",
     args: launchArgs(),
     protocolTimeout: parseInt(process.env.PUPPETEER_PROTOCOL_TIMEOUT || "180000", 10),
+    ...(execPath ? { executablePath: execPath } : {}),
   };
-  if (execPath) launchOpts.executablePath = execPath;
-
-  console.log("[PDFSERVICE] chrome exec:", execPath || "(auto via puppeteer)");
+  console.log("[PDFSERVICE] chrome exec:", execPath || "(auto)");
   const browser = await puppeteer.launch(launchOpts);
   try {
     const page = await browser.newPage();
     await page.setCacheEnabled(false);
     await page.emulateMediaType("screen");
     await page.setContent(html, { waitUntil: "networkidle0" });
-
     const pdf = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      preferCSSPageSize: true,
+      format: "A4", printBackground: true, preferCSSPageSize: true,
       margin: { top: "12mm", right: "12mm", bottom: "16mm", left: "12mm" },
     });
     return pdf;
   } finally {
-    try { await browser.close(); } catch {}
+    await browser.close().catch(() => {});
   }
 }
 
-// ------------------------- Diagnose -------------------------------
-app.get("/health", (_req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+// --- Routes ---
+app.get("/health", (_, res) => res.json({ ok: true, ts: Date.now() }));
 
-app.get("/env", (_req, res) => {
-  let exec = null;
-  try { exec = puppeteer.executablePath(); } catch {}
-  const fallbacks = ["/usr/bin/chromium","/usr/bin/chromium-browser","/usr/bin/google-chrome","/usr/bin/google-chrome-stable"].filter((p) => fs.existsSync(p));
-  res.json({ ok: true, puppeteerExecutablePath: exec || null, envExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH || null, fallbacksExisting: fallbacks });
-});
-
-app.get("/smtp/verify", async (_req, res) => {
-  const t = makeTransport();
-  const v = await verifySmtp(t);
-  res.json(v);
-});
-
-app.get("/smtp/config", (_req, res) => {
-  const t1 = makeTransport();
-  const t2 = makeTransport({ alternate: true });
-  res.json({ primary: t1.__info || {}, alternate: t2.__info || {}, sendgrid: !!process.env.SENDGRID_API_KEY });
-});
-
-// ------------------------- Core Route ------------------------------
 app.post("/generate-pdf", async (req, res) => {
   const rid = req.get("X-Request-ID") || crypto.randomUUID();
   const wantAsyncMail = (String(process.env.EMAIL_ASYNC || "true").toLowerCase() !== "false");
-  const returnJson = _bool(process.env.RETURN_JSON_BASE64, false) || (String(req.headers["accept"] || "").includes("application/json"));
+  const returnJson = _bool(process.env.RETURN_JSON_BASE64, String(req.headers["accept"] || "").includes("application/json"));
 
   let userEmail = req.get("X-User-Email") || "";
   let subject = req.get("X-Subject") || process.env.SUBJECT || "Ihr KI-Status-Report";
@@ -328,44 +259,37 @@ app.post("/generate-pdf", async (req, res) => {
   } else {
     return res.status(415).json({ ok: false, error: "Unsupported Content-Type", rid });
   }
-
   if (!html || html.length < 20) return res.status(400).json({ ok: false, error: "Empty html", rid });
 
   console.log("[PDFSERVICE] Render start", { rid, len: html.length, userEmail, lang: reqLang || null });
-
   try {
     const sanitized = sanitizeHtml(html);
     const pdfBuffer = await renderPdf(sanitized);
-    console.log("[PDFSERVICE] Render ok", { rid, size: pdfBuffer.length });
-
-    const txt = reqLang === "en"
-      ? "Thank you. Your individual AI Readiness report is attached."
-      : "Vielen Dank. Anbei Ihr individueller KI Status Report.";
 
     if (returnJson) {
-      // JSON mode (for callers expecting JSON)
-      const b64 = pdfBuffer.toString("base64");
+      res.setHeader("Content-Type", "application/json");
+      res.status(200).json({
+        ok: true,
+        rid, status: "ok",
+        data: { mail: wantAsyncMail ? "queued" : "sent-or-skipped", len: pdfBuffer.length },
+        pdf_base64: pdfBuffer.toString("base64"),
+      });
+    } else {
       res.setHeader("X-Mail-Mode", wantAsyncMail ? "async" : "sync");
       res.setHeader("X-Mail-Engine", process.env.SENDGRID_API_KEY ? "sendgrid-or-smtp" : "smtp");
-      res.status(200).json({ ok: true, rid, size: pdfBuffer.length, pdf_base64: b64 });
-      if (wantAsyncMail) {
-        setTimeout(async () => {
-          try { await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Status-Report.pdf" }); } catch (e) { console.error("[PDFSERVICE] async mail error:", e?.message || e); }
-        }, 10);
-      }
-      return;
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Status-Report.pdf")}`);
+      res.status(200).send(pdfBuffer);
     }
-
-    // Default: PDF stream response (application/pdf)
-    res.setHeader("X-Mail-Mode", wantAsyncMail ? "async" : "sync");
-    res.setHeader("X-Mail-Engine", process.env.SENDGRID_API_KEY ? "sendgrid-or-smtp" : "smtp");
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Status-Report.pdf")}`);
-    res.status(200).send(pdfBuffer);
 
     if (wantAsyncMail) {
       setTimeout(async () => {
-        try { await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Status-Report.pdf" }); } catch (e) { console.error("[PDFSERVICE] async mail error:", e?.message || e); }
+        try {
+          await sendMailSafe({
+            to: userEmail, subject, text: reqLang.startsWith("de") ? "Ihr Report ist angehängt." : "Your report is attached.",
+            pdfBuffer, filename: "KI-Status-Report.pdf", replyTo: userEmail || undefined
+          });
+        } catch (e) { console.error("[PDFSERVICE] async mail error:", e?.message || e); }
       }, 10);
     }
   } catch (e) {
