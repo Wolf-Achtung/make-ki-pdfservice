@@ -1,4 +1,9 @@
-// index.js — PDF-Service (Gold-Standard, async mail + hardened SMTP)
+// index.js — Full PDF Service (optimized, hardened, compatible)
+// Preserves: SMTP/SendGrid, async mail, diagnostics (/health, /smtp/*, /env)
+// Adds: hardened puppeteer flags (--no-zygote, --single-process, etc.),
+//       HTML sanitizer (scripts + optional @page removal + size cap),
+//       dual response mode (PDF stream *or* JSON base64), robust content-type handling.
+
 import express from "express";
 import cors from "cors";
 import nodemailer from "nodemailer";
@@ -18,17 +23,29 @@ app.use(cors({ origin: "*" }));
 // ------------------------- Helpers -------------------------
 function _bool(env, def = false) {
   const v = String(env ?? "").trim().toLowerCase();
-  if (v === "true") return true;
-  if (v === "false") return false;
+  if (v === "true" || v === "1") return true;
+  if (v === "false" || v === "0") return false;
   return def;
 }
 
-// ASCII-Sanitizer: entfernt Nicht-ASCII (z. B. für SendGrid-Header)
 const ascii = (s) => (s || "").normalize("NFKD").replace(/[^\x00-\x7F]/g, "");
+
+// Sanitizer for incoming HTML
+function sanitizeHtml(input = "") {
+  const stripScripts = _bool(process.env.PDF_STRIP_SCRIPTS, true);
+  const stripPageAt = _bool(process.env.PDF_STRIP_PAGE_AT_RULES, true);
+  let t = String(input || "");
+  if (stripScripts) t = t.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  if (stripPageAt) t = t.replace(/@page\s*\{[\s\S]*?\}/gi, "").replace(/@page\s*:[^{]+\{[\s\S]*?\}/gi, "");
+  const maxBytes = parseInt(process.env.PDF_MAX_BYTES || "600000", 10);
+  if (maxBytes && Buffer.byteLength(t, "utf8") > maxBytes) {
+    t = Buffer.from(t, "utf8").subarray(0, maxBytes).toString("utf8") + "\n<!-- truncated -->";
+  }
+  return t;
+}
 
 // ------------------------- SMTP -----------------------------
 function makeTransport({ alternate = false } = {}) {
-  // Standard: STARTTLS (587). Alternate probiert implicit TLS (465).
   const wantSecure = _bool(process.env.SMTP_SECURE, false);
   const wantPort = parseInt(process.env.SMTP_PORT || (wantSecure ? "465" : "587"), 10);
 
@@ -87,13 +104,8 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
   async function _trySend(t) {
     const tasks = [];
     if (adminEmail) {
-      // Include the recipient address in the admin mail so the admin knows which user the report belongs to.
-      const adminSubject = ascii(
-        `KI-Status Report für ${to || 'Unbekannt'}`
-      );
-      const adminText = ascii(
-        `Neuer Report wurde erstellt für ${to || 'Unbekannt'}.`
-      );
+      const adminSubject = ascii(`KI-Status Report für ${to || "Unbekannt"}`);
+      const adminText = ascii(`Neuer Report wurde erstellt für ${to || "Unbekannt"}.`);
       tasks.push(
         t.sendMail({
           from,
@@ -101,19 +113,8 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
           to: adminEmail,
           subject: adminSubject,
           text: adminText,
-          attachments: [
-            {
-              filename: ascii(filename),
-              content: pdfBuffer,
-              contentType: "application/pdf",
-            },
-          ],
-        })
-          .then(() => (meta.admin = "ok"))
-          .catch((err) => {
-            meta.admin = "fail";
-            throw err;
-          })
+          attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
+        }).then(() => (meta.admin = "ok")).catch((err) => { meta.admin = "fail"; throw err; })
       );
     }
     if (to) {
@@ -123,14 +124,12 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
           subject: ascii(subject || "Ihr KI-Status-Report"),
           text: ascii(text || "Ihr Report ist angehängt."),
           attachments: [{ filename: ascii(filename), content: pdfBuffer, contentType: "application/pdf" }],
-        }).then(() => (meta.user = "ok"))
-         .catch((err) => { meta.user = "fail"; throw err; })
+        }).then(() => (meta.user = "ok")).catch((err) => { meta.user = "fail"; throw err; })
       );
     }
     await Promise.all(tasks.map(p => p.catch(e => { throw e; })));
   }
 
-  // 1) Primär (587/STARTTLS)
   try {
     meta.attempt = 1;
     const t1 = makeTransport();
@@ -142,7 +141,6 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
     console.error("[PDFSERVICE] SMTP primary error:", e?.message || e);
   }
 
-  // 2) Alternate (465⇄587 / secure invertiert)
   if (_bool(process.env.SMTP_TRY_ALTERNATE, true)) {
     try {
       meta.attempt = 2;
@@ -157,7 +155,6 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
     }
   }
 
-  // 3) SendGrid-Fallback (ASCII-sicher)
   if (process.env.SENDGRID_API_KEY) {
     try {
       meta.engine = "sendgrid";
@@ -179,21 +176,14 @@ async function sendMailSafe({ to, subject, text, pdfBuffer, filename = "KI-Statu
       console.error("[PDFSERVICE] SendGrid error:", e3?.message || e3);
     }
   }
-
-  return meta; // PDF ist trotzdem generiert
+  return meta;
 }
 
 async function sendViaSendgrid({ to, adminEmail, subject, text, pdfBuffer, filename }) {
   const key = process.env.SENDGRID_API_KEY;
   if (!key) return false;
-
-  // Nur E-Mail als From (ohne Display-Name!)
   const from = process.env.SENDGRID_FROM || process.env.SMTP_FROM || process.env.SMTP_USER || "pdf@localhost";
-
-  // sanitize from-address to avoid non-ASCII characters in SendGrid payload
   const sanitizedFrom = ascii(from);
-
-
   const personalizations = [];
   if (adminEmail) personalizations.push({ to: [{ email: adminEmail }] });
   if (to) personalizations.push({ to: [{ email: to }] });
@@ -248,18 +238,33 @@ async function resolveChromePath() {
   return null;
 }
 
+function launchArgs() {
+  return [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-accelerated-2d-canvas",
+    "--disable-gpu",
+    "--disable-web-security",
+    // Hardened flags:
+    "--no-zygote",
+    "--single-process",
+    "--disable-software-rasterizer",
+    "--mute-audio",
+  ];
+}
+
 async function renderPdf(html) {
   sanitizePuppeteerEnv();
   const execPath = await resolveChromePath();
   const launchOpts = {
-    headless: "new",
-    args: ["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-accelerated-2d-canvas","--disable-gpu","--disable-web-security"],
+    headless: process.env.PUPPETEER_HEADLESS || "new",
+    args: launchArgs(),
     protocolTimeout: parseInt(process.env.PUPPETEER_PROTOCOL_TIMEOUT || "180000", 10),
   };
   if (execPath) launchOpts.executablePath = execPath;
 
   console.log("[PDFSERVICE] chrome exec:", execPath || "(auto via puppeteer)");
-
   const browser = await puppeteer.launch(launchOpts);
   try {
     const page = await browser.newPage();
@@ -275,7 +280,7 @@ async function renderPdf(html) {
     });
     return pdf;
   } finally {
-    await browser.close();
+    try { await browser.close(); } catch {}
   }
 }
 
@@ -305,79 +310,69 @@ app.get("/smtp/config", (_req, res) => {
 app.post("/generate-pdf", async (req, res) => {
   const rid = req.get("X-Request-ID") || crypto.randomUUID();
   const wantAsyncMail = (String(process.env.EMAIL_ASYNC || "true").toLowerCase() !== "false");
+  const returnJson = _bool(process.env.RETURN_JSON_BASE64, false) || (String(req.headers["accept"] || "").includes("application/json"));
 
   let userEmail = req.get("X-User-Email") || "";
   let subject = req.get("X-Subject") || process.env.SUBJECT || "Ihr KI-Status-Report";
   const reqLang = (req.get("X-Lang") || "").toLowerCase();
 
-  // Body lesen
   let html = "";
   const ctype = String(req.headers["content-type"] || "").toLowerCase();
   if (typeof req.body === "string" && ctype.startsWith("text/")) {
     html = req.body;
   } else if (req.is("application/json")) {
-    const { html: h, to, subject: subj, lang } = req.body || {};
-    html = h || "";
+    const { html: h, to, subject: subj } = req.body || {};
+    html = String(h || "");
     if (to) userEmail = String(to);
     if (subj) subject = String(subj);
   } else {
-    return res.status(415).json({ ok: false, error: "Unsupported Content-Type" });
+    return res.status(415).json({ ok: false, error: "Unsupported Content-Type", rid });
   }
 
-  if (!html || html.length < 20) return res.status(400).json({ ok: false, error: "Empty html" });
+  if (!html || html.length < 20) return res.status(400).json({ ok: false, error: "Empty html", rid });
 
   console.log("[PDFSERVICE] Render start", { rid, len: html.length, userEmail, lang: reqLang || null });
 
-  let pdfBuffer;
   try {
-    pdfBuffer = await renderPdf(html);
+    const sanitized = sanitizeHtml(html);
+    const pdfBuffer = await renderPdf(sanitized);
     console.log("[PDFSERVICE] Render ok", { rid, size: pdfBuffer.length });
-  } catch (e) {
-    console.error("[PDFSERVICE] render error", e);
-    return res.status(500).json({ ok: false, error: String(e) });
-  }
 
-  // --- ASYNC MAIL: PDF sofort senden, Mail im Hintergrund ---
-  const txt = reqLang === "en"
-    ? "Thank you. Your individual AI Readiness report is attached."
-    : "Vielen Dank. Anbei Ihr individueller KI Status Report.";
+    const txt = reqLang === "en"
+      ? "Thank you. Your individual AI Readiness report is attached."
+      : "Vielen Dank. Anbei Ihr individueller KI Status Report.";
 
-  res.setHeader("X-Mail-Mode", wantAsyncMail ? "async" : "sync");
-  res.setHeader("X-Mail-Engine", process.env.SENDGRID_API_KEY ? "sendgrid-or-smtp" : "smtp");
+    if (returnJson) {
+      // JSON mode (for callers expecting JSON)
+      const b64 = pdfBuffer.toString("base64");
+      res.setHeader("X-Mail-Mode", wantAsyncMail ? "async" : "sync");
+      res.setHeader("X-Mail-Engine", process.env.SENDGRID_API_KEY ? "sendgrid-or-smtp" : "smtp");
+      res.status(200).json({ ok: true, rid, size: pdfBuffer.length, pdf_base64: b64 });
+      if (wantAsyncMail) {
+        setTimeout(async () => {
+          try { await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Status-Report.pdf" }); } catch (e) { console.error("[PDFSERVICE] async mail error:", e?.message || e); }
+        }, 10);
+      }
+      return;
+    }
 
-  if (wantAsyncMail) {
-    res.setHeader("X-Email-Admin", "queued");
-    res.setHeader("X-Email-User", userEmail ? "queued" : "skip");
+    // Default: PDF stream response (application/pdf)
+    res.setHeader("X-Mail-Mode", wantAsyncMail ? "async" : "sync");
+    res.setHeader("X-Mail-Engine", process.env.SENDGRID_API_KEY ? "sendgrid-or-smtp" : "smtp");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Status-Report.pdf")}`);
-    // Antwort JETZT senden
     res.status(200).send(pdfBuffer);
 
-    // Mailversand „fire-and-forget“
-    setTimeout(async () => {
-      try {
-        await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Status-Report.pdf" });
-      } catch (e) {
-        console.error("[PDFSERVICE] async mail error:", e?.message || e);
-      }
-    }, 10);
-
-    return; // Route ist fertig
-  }
-
-  // --- SYNC MAIL (nur wenn EMAIL_ASYNC=false explizit gesetzt) ---
-  let mailMeta = { admin: "skip", user: "skip" };
-  try {
-    mailMeta = await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Status-Report.pdf" });
+    if (wantAsyncMail) {
+      setTimeout(async () => {
+        try { await sendMailSafe({ to: userEmail, subject, text: txt, pdfBuffer, filename: "KI-Status-Report.pdf" }); } catch (e) { console.error("[PDFSERVICE] async mail error:", e?.message || e); }
+      }, 10);
+    }
   } catch (e) {
-    console.error("[PDFSERVICE] mail pipeline error:", e?.message || e);
+    console.error("[PDFSERVICE] render error", e);
+    const msg = String(e && e.message || e);
+    return res.status(500).json({ ok: false, rid, error: "Failed to launch or render PDF: " + msg });
   }
-
-  res.setHeader("X-Email-Admin", mailMeta.admin || "skip");
-  res.setHeader("X-Email-User", mailMeta.user || "skip");
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename=${ascii("KI-Status-Report.pdf")}`);
-  return res.status(200).send(pdfBuffer);
 });
 
 app.listen(PORT, () => console.log(`PDF-Service läuft auf Port ${PORT}`));
