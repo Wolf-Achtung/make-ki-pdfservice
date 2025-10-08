@@ -1,26 +1,19 @@
 {
   "name": "make-ki-pdfservice",
-  "version": "1.2.1",
-  "private": true,
-  "description": "HTML → PDF Microservice (Puppeteer) with /metrics, /health/html and incognito browser pool",
+  "version": "2.0.0",
+  "description": "Render-only PDF microservice for KI-Status-Report (Gold-Standard+)",
   "main": "index.js",
-  "engines": { "node": ">=20.10" },
+  "type": "commonjs",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon --watch index.js index.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "compression": "^1.7.4",
-    "cors": "^2.8.5",
-    "dompurify": "^3.0.9",
     "express": "^4.19.2",
-    "express-rate-limit": "^7.4.0",
+    "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
-    "jsdom": "^24.1.1",
-    "prom-client": "^15.1.2",
-    "puppeteer": "^22.10.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.7"
+    "prom-client": "^15.1.1",
+    "puppeteer": "^22.10.0",
+    "pino": "^9.3.2",
+    "uuid": "^9.0.1"
   }
 }

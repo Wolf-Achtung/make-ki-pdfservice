@@ -1,216 +1,206 @@
-// filename: index.js
-/* eslint-disable no-console */
-'use strict';
-
-/**
- * make-ki-pdfservice – Node/Puppeteer (Gold-Standard+, Render-only)
- * Endpunkte:
- *  - GET  /health           -> JSON
- *  - GET  /health/html      -> HTML-Dashboard
- *  - GET  /metrics          -> Prometheus
- *  - POST /generate-pdf     -> application/pdf (default) ODER JSON {pdf_base64, bytes} (wenn return_pdf_bytes=false)
- *  - POST /render-pdf       -> application/pdf (Legacy-Kompatibilität)
+// File: index.js
+/* Render-only PDF microservice (Gold-Standard+)
+ * - Endpoints: /generate-pdf, /render-pdf (compat), /metrics, /health, /health/html
+ * - Puppeteer incognito pool (configurable), basic queue protection.
+ * - Prometheus metrics, simple HTML dashboard.
  */
 
+'use strict';
 const express = require('express');
-const cors = require('cors');
 const helmet = require('helmet');
-const compression = require('compression');
 const rateLimit = require('express-rate-limit');
-const { JSDOM } = require('jsdom');
-const createDOMPurify = require('dompurify');
-const puppeteer = require('puppeteer');
 const client = require('prom-client');
+const pino = require('pino');
+const { v4: uuidv4 } = require('uuid');
+const os = require('os');
 
-const PORT = Number(process.env.PORT || 8000);
-const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
-const ALLOW = (process.env.ALLOW_ORIGINS || '*').split(',').map(s => s.trim()).filter(Boolean);
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
-const MAX_HTML_SIZE_BYTES = Number(process.env.MAX_HTML_SIZE_BYTES || 2_000_000);
-const DEFAULT_FORMAT = process.env.DEFAULT_FORMAT || 'A4';
-const DEFAULT_MARGIN_MM = process.env.DEFAULT_MARGIN_MM || '12,12,12,12';
-const PUPPETEER_HEADLESS = process.env.PUPPETEER_HEADLESS || 'new';
-const PUPPETEER_PROTOCOL_TIMEOUT = Number(process.env.PUPPETEER_PROTOCOL_TIMEOUT || 180000);
+// Puppeteer (Chromium provided by base image ghcr.io/puppeteer/puppeteer)
+const puppeteer = require('puppeteer');
 
-// Browser-Pool ENV
-const BROWSER_POOL_SIZE = Math.min(Math.max(Number(process.env.BROWSER_POOL_SIZE || 4), 1), 32);
-const BROWSER_POOL_MAX = Math.min(Math.max(Number(process.env.BROWSER_POOL_MAX || 8), BROWSER_POOL_SIZE), 64);
-const CONTEXT_REUSE_LIMIT = Math.max(Number(process.env.BROWSER_CONTEXT_REUSE_LIMIT || 100), 1);
-const POOL_WARMUP = String(process.env.BROWSER_POOL_WARMUP || 'true').toLowerCase() === 'true';
+// -------------------- Config --------------------
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HTML_LIMIT = process.env.HTML_LIMIT || '15mb';
+const JSON_LIMIT = process.env.JSON_LIMIT || '15mb';
+const PDF_MAX_BYTES = parseInt(process.env.PDF_MAX_BYTES || String(10 * 1024 * 1024), 10);
+const STRIP_SCRIPTS = (process.env.PDF_STRIP_SCRIPTS || '1').match(/^(1|true|yes)$/i);
+const STRIP_PAGE_AT_RULES = (process.env.PDF_STRIP_PAGE_AT_RULES || '1').match(/^(1|true|yes)$/i);
+const RETURN_JSON_BASE64 = (process.env.RETURN_JSON_BASE64 || '1').match(/^(1|true|yes)$/i);
 
-// ---------------------------- Prometheus ------------------------------------
-client.collectDefaultMetrics({ prefix: 'pdfsvc_' });
-const REQ_TOTAL = new client.Counter({ name: 'pdfsvc_http_requests_total', help: 'HTTP requests', labelNames: ['method', 'route', 'status'] });
-const RENDER_SEC = new client.Histogram({ name: 'pdfsvc_render_duration_seconds', help: 'Render duration', buckets: [0.1,0.25,0.5,1,2,4,8,15] });
-const INFLIGHT = new client.Gauge({ name: 'pdfsvc_renders_in_flight', help: 'Renders in flight' });
-const POOL_SIZE_G = new client.Gauge({ name: 'pdfsvc_browser_pool_size', help: 'Pool size' });
-const POOL_AVAIL_G = new client.Gauge({ name: 'pdfsvc_browser_pool_available', help: 'Pool available' });
+const HEADLESS = process.env.PUPPETEER_HEADLESS || 'new';
+const BROWSER_POOL_SIZE = Math.max(1, Math.min(8, parseInt(process.env.BROWSER_POOL_SIZE || '4', 10)));
+const RENDER_TIMEOUT_MS = parseInt(process.env.RENDER_TIMEOUT_MS || '45000', 10);
 
-// ------------------------------ Utils ---------------------------------------
-function truthy(v){ if(typeof v==='boolean')return v; if(typeof v==='number')return v!==0; if(typeof v==='string')return ['1','true','yes','on'].includes(v.trim().toLowerCase()); return false; }
-function mmTuple(str){
-  const parts = String(str || DEFAULT_MARGIN_MM).split(',').map(s=>s.trim());
-  const safe = (parts.length>=4?parts:parts.concat(['12','12','12','12']).slice(0,4)).map(x=>isNaN(Number(x))?12:Number(x));
-  return { top:safe[0], right:safe[1], bottom:safe[2], left:safe[3] };
-}
-function sanitizeHtml(input,{stripScripts=true,stripEvents=true}={}){
-  const window = new JSDOM('').window;
-  const DOMPurify = createDOMPurify(window);
-  if(stripScripts){ DOMPurify.addHook('uponSanitizeElement',(node,data)=>{ if((data.tagName||'').toLowerCase()==='script'){ node.parentNode&&node.parentNode.removeChild(node);} }); }
-  if(stripEvents){ DOMPurify.addHook('uponSanitizeAttribute',(_node,data)=>{ if((data.attrName||'').toLowerCase().startsWith('on')) return {keepAttr:false}; }); }
-  return DOMPurify.sanitize(String(input||''), { WHOLE_DOCUMENT:true, RETURN_DOM_FRAGMENT:false });
+// Very conservative: 1 job per context (simple + stable). If all busy -> 503.
+const contexts = [];
+const busy = new Set();
+
+// -------------------- Metrics --------------------
+client.collectDefaultMetrics();
+const httpReqs = new client.Counter({ name: 'pdf_http_requests_total', help: 'HTTP requests', labelNames: ['route','status'] });
+const renderDur = new client.Histogram({ name: 'pdf_render_seconds', help: 'Render duration seconds' });
+const poolAvail = new client.Gauge({ name: 'pdf_pool_available', help: 'Incognito contexts available' });
+
+function updatePoolGauge() {
+  poolAvail.set(contexts.length - busy.size);
 }
 
-// --------------------------- Browser / Pool ---------------------------------
-let browserPromise = null;
-let pool = [];
-let available = [];
-const uses = new Map();
-const waiters = [];
+// -------------------- HTML helpers --------------------
+function stripScripts(html) {
+  if (!STRIP_SCRIPTS) return html;
+  return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+}
+function stripAtRules(html) {
+  if (!STRIP_PAGE_AT_RULES) return html;
+  return html.replace(/@page\s*\{[^}]*\}/gi, '');
+}
+function sanitize(html) {
+  let h = html || '';
+  h = stripScripts(h);
+  h = stripAtRules(h);
+  return h;
+}
 
-async function getBrowser(){
-  if(!browserPromise){
-    browserPromise = puppeteer.launch({
-      headless: PUPPETEER_HEADLESS,
-      args: ['--no-sandbox','--disable-setuid-sandbox'],
-      protocolTimeout: PUPPETEER_PROTOCOL_TIMEOUT
-    });
+// -------------------- Browser Pool --------------------
+let browser = null;
+
+async function initPool() {
+  if (browser) return;
+  browser = await puppeteer.launch({
+    headless: HEADLESS,
+    args: ['--no-sandbox','--disable-setuid-sandbox','--font-render-hinting=medium','--disable-dev-shm-usage']
+  });
+  for (let i=0;i<BROWSER_POOL_SIZE;i++) {
+    const ctx = await browser.createIncognitoBrowserContext();
+    contexts.push(ctx);
   }
-  return browserPromise;
+  updatePoolGauge();
+  logger.info({size: BROWSER_POOL_SIZE}, 'browser pool initialized');
 }
-async function createContext(){
-  const b = await getBrowser();
-  const ctx = await b.createIncognitoBrowserContext();
-  uses.set(ctx,0);
-  pool.push(ctx);
-  available.push(ctx);
-  POOL_SIZE_G.set(pool.length); POOL_AVAIL_G.set(available.length);
-  return ctx;
-}
-async function warmupPool(){
-  const target = Math.min(BROWSER_POOL_SIZE, BROWSER_POOL_MAX);
-  for(let i=pool.length;i<target;i+=1){ await createContext(); }
-}
-function _resolveNext(){ const w = waiters.shift(); if(w) w(); }
-async function acquireContext(){
-  if(available.length){ const ctx = available.pop(); POOL_AVAIL_G.set(available.length); return ctx; }
-  if(pool.length < BROWSER_POOL_MAX){ return createContext(); }
-  await new Promise(res=>waiters.push(res));
-  const ctx = available.pop(); POOL_AVAIL_G.set(available.length); return ctx;
-}
-async function releaseContext(ctx){
-  try{
-    const n=(uses.get(ctx)||0)+1; uses.set(ctx,n);
-    if(n>=CONTEXT_REUSE_LIMIT){
-      try{ await ctx.close(); }catch(_){}
-      const idx=pool.indexOf(ctx); if(idx>=0) pool.splice(idx,1);
-      uses.delete(ctx); await createContext();
-    }else{
-      available.push(ctx); POOL_AVAIL_G.set(available.length);
+
+async function acquireContext() {
+  for (let i=0;i<contexts.length;i++) {
+    const ctx = contexts[i];
+    if (!busy.has(ctx)) {
+      busy.add(ctx);
+      updatePoolGauge();
+      return ctx;
     }
-  }finally{ _resolveNext(); }
+  }
+  return null; // too busy
 }
 
-async function renderPdf({ html, filename, pageFormat, marginMM, viewportWidth, waitUntil, stripScripts, maxBytes }){
-  if(!html) throw new Error('html required');
-  const rawBytes = Buffer.byteLength(html,'utf8');
-  const limit = Number(maxBytes || MAX_HTML_SIZE_BYTES);
-  if(rawBytes>limit) throw new Error(`HTML too large (${rawBytes} > ${limit})`);
+function releaseContext(ctx) {
+  if (busy.has(ctx)) {
+    busy.delete(ctx);
+    updatePoolGauge();
+  }
+}
 
-  const cleanHtml = sanitizeHtml(html,{ stripScripts: truthy(stripScripts), stripEvents:true });
+async function renderToBuffer(html, filename) {
+  await initPool();
   const ctx = await acquireContext();
-  try{
+  if (!ctx) {
+    const err = new Error('PDF service busy – please retry shortly');
+    err.status = 503;
+    throw err;
+  }
+  const start = Date.now();
+  try {
     const page = await ctx.newPage();
-    await page.setViewport({ width:Number(viewportWidth)||1280, height:900 });
-    const wait = (['load','domcontentloaded','networkidle0','networkidle2'].includes(String(waitUntil).toLowerCase()))
-      ? String(waitUntil).toLowerCase() : 'networkidle0';
-    await page.setContent(cleanHtml,{ waitUntil:wait });
-    const m = mmTuple(marginMM);
-    const buf = await page.pdf({
-      format: pageFormat || DEFAULT_FORMAT,
-      margin: { top:`${m.top}mm`, right:`${m.right}mm`, bottom:`${m.bottom}mm`, left:`${m.left}mm` },
-      printBackground: true
+    await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
+    await page.setContent(sanitize(html), { waitUntil: 'networkidle0', timeout: RENDER_TIMEOUT_MS });
+    const pdf = await page.pdf({
+      printBackground: true,
+      format: 'A4',
+      displayHeaderFooter: false,
+      margin: { top: '12mm', bottom: '14mm', left: '12mm', right: '12mm' },
     });
     await page.close();
-    return { buffer: buf, filename: filename || 'report.pdf' };
-  }finally{
-    await releaseContext(ctx);
+    renderDur.observe((Date.now() - start) / 1000);
+    if (pdf.length > PDF_MAX_BYTES) {
+      const err = new Error(`PDF larger than limit (${pdf.length} > ${PDF_MAX_BYTES})`);
+      err.status = 413;
+      throw err;
+    }
+    return pdf;
+  } finally {
+    releaseContext(ctx);
   }
 }
 
-// ------------------------------ App -----------------------------------------
+// -------------------- Server --------------------
 const app = express();
-app.disable('x-powered-by');
-app.use(cors({ origin: ALLOW, credentials: true }));
-app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use(compression());
-app.use(express.json({ limit: process.env.JSON_LIMIT || '10mb' }));
-app.use(express.urlencoded({ extended:false, limit: process.env.HTML_LIMIT || '10mb' }));
-app.use(rateLimit({ windowMs: 60*1000, max: Number(process.env.RATE_LIMIT_PER_MIN || 120) }));
+app.set('x-powered-by', false);
+app.use(helmet());
+app.use(express.json({ limit: JSON_LIMIT }));
+app.use(express.urlencoded({ extended: false, limit: HTML_LIMIT }));
 
-// Metrics MW
-app.use((req,res,next)=>{
-  const start = process.hrtime.bigint();
-  res.on('finish', ()=>{
-    const dur = Number(process.hrtime.bigint()-start)/1e9;
-    REQ_TOTAL.labels(req.method, req.route?.path || req.path, String(res.statusCode)).inc();
-    if(req.path==='/generate-pdf' || req.path==='/render-pdf'){ RENDER_SEC.observe(dur); }
-  });
-  next();
+const limiter = rateLimit({ windowMs: 60 * 1000, max: 120 });
+app.use(limiter);
+
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', client.register.contentType);
+  res.end(await client.register.metrics());
 });
 
-app.get('/health', async (_req,res)=>{
-  try{
-    const b = await getBrowser(); const version = await b.version();
-    if(POOL_WARMUP && pool.length < BROWSER_POOL_SIZE) await warmupPool();
-    res.json({ ok:true, engine:'puppeteer', version, pool:{ size:pool.length, available:available.length, max:BROWSER_POOL_MAX, reuse_limit:CONTEXT_REUSE_LIMIT }, limits:{ MAX_HTML_SIZE_BYTES } });
-  }catch(e){ res.status(503).json({ ok:false, detail:String(e) }); }
+app.get('/health', (req, res) => {
+  updatePoolGauge();
+  res.json({ ok: true, ts: new Date().toISOString(), version: '2.0.0', pool: { size: contexts.length, busy: busy.size } });
 });
 
-app.get('/health/html', async (_req,res)=>{
-  const b = await getBrowser(); const version = await b.version();
-  const html = `<!doctype html><meta charset="utf-8">
-  <title>PDF Service Health</title>
-  <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:2rem;color:#111}
-  .grid{display:grid;grid-template-columns:repeat(2,minmax(260px,1fr));gap:1rem}.card{border:1px solid #e5e5e5;border-radius:12px;padding:1rem}
-  h1{font-size:1.1rem;margin:.2rem 0}.kv{display:flex;justify-content:space-between;margin:.2rem 0}.mono{font-family:ui-monospace,Menlo,Consolas,monospace}</style>
-  <h1>make-ki-pdfservice – Health</h1>
-  <div class="grid">
-    <div class="card"><h1>Engine</h1><div class="kv"><span>runtime</span><span class="mono">puppeteer</span></div><div class="kv"><span>version</span><span class="mono">${version}</span></div><div class="kv"><span>html limit</span><span class="mono">${MAX_HTML_SIZE_BYTES} B</span></div></div>
-    <div class="card"><h1>Browser Pool</h1><div class="kv"><span>size</span><span class="mono">${pool.length}</span></div><div class="kv"><span>available</span><span class="mono">${available.length}</span></div><div class="kv"><span>max</span><span class="mono">${BROWSER_POOL_MAX}</span></div><div class="kv"><span>reuse</span><span class="mono">${CONTEXT_REUSE_LIMIT}</span></div></div>
-  </div>`;
-  res.setHeader('Content-Type','text/html; charset=utf-8'); res.end(html);
+app.get('/health/html', async (req, res) => {
+  updatePoolGauge();
+  const html = `<!doctype html><meta charset="utf-8"><title>PDF Service /health</title>
+  <style>body{font:14px system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:880px;margin:2rem auto}
+  .card{border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:.75rem 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}</style>
+  <h1>PDF Service <small>v2.0.0</small></h1>
+  <div class="card"><b>Status:</b> OK<br>Time: ${new Date().toISOString()}<br>
+  Pool: ${contexts.length} contexts, busy: ${busy.size}<br>
+  Host: ${os.hostname()}</div>
+  <p><a href="/metrics">/metrics</a></p>`;
+  res.set('Content-Type','text/html; charset=utf-8').send(html);
 });
 
-app.get('/metrics', async (_req,res)=>{ res.set('Content-Type', client.register.contentType); res.end(await client.register.metrics()); });
+async function handleRender(req, res) {
+  const route = req.path;
+  try {
+    const { html, filename, return_pdf_bytes, meta } = req.body || {};
+    if (!html || typeof html !== 'string') {
+      httpReqs.labels(route, '400').inc();
+      return res.status(400).json({ ok: false, error: 'html required' });
+    }
+    const buf = await renderToBuffer(html, filename || 'report.pdf');
+    if (return_pdf_bytes || RETURN_JSON_BASE64) {
+      httpReqs.labels(route, '200').inc();
+      return res.json({ ok: true, pdf_base64: buf.toString('base64'), bytes: buf.length, meta: meta || null });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${(filename || 'report.pdf').replace(/[^a-zA-Z0-9_.-]+/g,'_')}"`);
+    httpReqs.labels(route, '200').inc();
+    return res.send(buf);
+  } catch (e) {
+    const status = e.status || 500;
+    httpReqs.labels(route, String(status)).inc();
+    logger.warn({ err: e.message }, 'render failed');
+    return res.status(status).json({ ok: false, error: String(e.message || e) });
+  }
+}
 
-app.post('/generate-pdf', async (req,res)=>{
-  INFLIGHT.inc(); const stop = RENDER_SEC.startTimer();
-  try{
-    const { html, filename, return_pdf_bytes, stripScripts, maxBytes, pageFormat, marginMM, viewportWidth, waitUntil } = req.body || {};
-    const { buffer, filename: fn } = await renderPdf({ html, filename, pageFormat, marginMM, viewportWidth, waitUntil, stripScripts, maxBytes });
-    const returnBytes = (typeof return_pdf_bytes === 'undefined') ? true : truthy(return_pdf_bytes);
-    if(!returnBytes){ return res.json({ ok:true, engine:'puppeteer', bytes: buffer.length, pdf_base64: buffer.toString('base64') }); }
-    res.setHeader('Content-Type','application/pdf'); res.setHeader('Content-Disposition',`attachment; filename="${fn}"`); res.send(buffer);
-  }catch(err){
-    const msg = String(err && err.message || err); res.status(msg.includes('HTML too large')?413:500).json({ ok:false, detail:msg });
-  }finally{ stop(); INFLIGHT.dec(); }
+app.post('/generate-pdf', handleRender);
+// Legacy-Compat: /render-pdf
+app.post('/render-pdf', handleRender);
+
+app.get('/', (req, res) => res.type('text/html').send('<h1>make-ki-pdfservice</h1><p>OK</p>'));
+
+process.on('SIGTERM', async () => {
+  logger.info('shutting down...');
+  try { if (browser) await browser.close(); } catch { /* ignore */ }
+  process.exit(0);
 });
 
-// Legacy-Kompatibilität: immer PDF
-app.post('/render-pdf', async (req, res) => {
-  INFLIGHT.inc(); const stop = RENDER_SEC.startTimer();
-  try{
-    const { html, filename, stripScripts, maxBytes, pageFormat, marginMM, viewportWidth, waitUntil } = req.body || {};
-    const { buffer, filename: fn } = await renderPdf({ html, filename, pageFormat, marginMM, viewportWidth, waitUntil, stripScripts, maxBytes });
-    res.setHeader('Content-Type','application/pdf'); res.setHeader('Content-Disposition',`attachment; filename="${fn||'report.pdf'}"`); res.send(buffer);
-  }catch(err){
-    const msg = String(err && err.message || err); res.status(msg.includes('HTML too large')?413:500).json({ ok:false, detail:msg });
-  }finally{ stop(); INFLIGHT.dec(); }
+app.listen(PORT, async () => {
+  await initPool();
+  logger.info({ port: PORT }, 'pdf service listening');
 });
-
-app.get('/', (_req,res)=>res.json({ ok:true, app:'make-ki-pdfservice' }));
-
-(async ()=>{ await getBrowser(); if(POOL_WARMUP) await warmupPool(); app.listen(PORT, ()=>{ if(LOG_LEVEL!=='silent') console.log(`[pdfservice] listening on :${PORT} (pool=${pool.length}/${BROWSER_POOL_MAX})`); }); })();
-
-process.on('SIGTERM', async ()=>{ try{ const b=await browserPromise; b && await b.close(); }catch(_){} process.exit(0); });

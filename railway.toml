@@ -1,23 +1,8 @@
-# filename: railway.toml
-[build]
-builder = "NIXPACKS"
-
-[deploy]
-startCommand = "node index.js"
-restartPolicyType = "ON_FAILURE"
-
-[env]
-PORT = "8000"
-LOG_LEVEL = "info"
-ALLOW_ORIGINS = "*"
-MAX_HTML_SIZE_BYTES = "2000000"
-DEFAULT_FORMAT = "A4"
-DEFAULT_MARGIN_MM = "12,12,12,12"
-PUPPETEER_HEADLESS = "new"
-PUPPETEER_PROTOCOL_TIMEOUT = "180000"
-
-# Browser Pool
-BROWSER_POOL_SIZE = "4"
-BROWSER_POOL_MAX = "8"
-BROWSER_CONTEXT_REUSE_LIMIT = "100"
-BROWSER_POOL_WARMUP = "true"
+# File: railway.toml
+[service]
+name = "make-ki-pdfservice"
+env = "production"
+internal_port = 3000
+healthcheck_path = "/health"
+restart_policy_type = "ON_FAILURE"
+restart_policy_max_retries = 3
