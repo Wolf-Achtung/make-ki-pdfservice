@@ -1,26 +1,17 @@
-#######################################################################
-# Railway service configuration
-#
-# This file tells Railway to use the provided Dockerfile instead of the
-# automatic Nixpacks build. By default, Railway detects a Dockerfile
-# when present in the repository, but on some projects built via file
-# upload you may need to explicitly specify it. The following
-# configuration points Railway to the Dockerfile in the root of the
-# repository.
-#
-# For more details on the file format see:
-# https://docs.railway.app/reference/project-config
-
+# filename: railway.toml
 [build]
-  # Path to the Dockerfile relative to the repository root. If you
-  # rename or move your Dockerfile, update this value accordingly.
-  dockerfile = "Dockerfile"
+builder = "NIXPACKS"
 
-  # Optional: The build context directory. By default Railway
-  # uses the repository root. If your Dockerfile lives in a subfolder
-  # you can set context here (e.g. context = "./backend").
-  # context = "."
+[deploy]
+startCommand = "node index.js"
+restartPolicyType = "ON_FAILURE"
 
-  # Optional: Additional build arguments can be provided here. For
-  # example, you can pass the Node environment or Puppeteer flags.
-  # args = { NODE_ENV = "production" }
+[env]
+PORT = "8000"
+LOG_LEVEL = "info"
+ALLOW_ORIGINS = "*"
+MAX_HTML_SIZE_BYTES = "2000000"
+DEFAULT_FORMAT = "A4"
+DEFAULT_MARGIN_MM = "12,12,12,12"
+PUPPETEER_HEADLESS = "new"
+PUPPETEER_PROTOCOL_TIMEOUT = "180000"
