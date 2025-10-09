@@ -1,4 +1,4 @@
-# File: Dockerfile
+# filename: Dockerfile
 FROM ghcr.io/puppeteer/puppeteer:22.10.0
 
 WORKDIR /app
@@ -10,18 +10,29 @@ COPY index.js ./
 
 ENV NODE_ENV=production
 ENV PUPPETEER_HEADLESS=new
-ENV BROWSER_POOL_SIZE=4
-ENV RENDER_TIMEOUT_MS=45000
+ENV BROWSER_POOL_SIZE=6
+ENV RENDER_TIMEOUT_MS=60000
 
-# Neue Defaults (können per Railway ENV überschrieben werden)
+# Body limits
 ENV JSON_LIMIT=20mb
 ENV HTML_LIMIT=20mb
-ENV PDF_MAX_BYTES_DEFAULT=10485760   # 10 MB
-ENV PDF_MAX_BYTES_CAP=26214400       # 25 MB
+
+# PDF size defaults
+ENV PDF_MAX_BYTES_DEFAULT=10485760
+ENV PDF_MAX_BYTES_CAP=33554432
+
+# Response behaviour
+ENV ALWAYS_PDF=1
 ENV RETURN_JSON_BASE64=0
+
+# Sanitizing / Minify
 ENV PDF_MINIFY_HTML=1
 ENV PDF_STRIP_SCRIPTS=1
 ENV PDF_STRIP_PAGE_AT_RULES=1
+
+# Queue
+ENV QUEUE_MAX=24
+ENV QUEUE_WAIT_MS=25000
 
 EXPOSE 3000
 CMD ["node","index.js"]
