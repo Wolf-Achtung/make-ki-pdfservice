@@ -1,7 +1,6 @@
-// File: index.js
 /* Render-only PDF microservice (Gold-Standard+)
  * - Endpoints: /generate-pdf, /render-pdf (compat), /metrics, /health, /health/html
- * - Puppeteer incognito pool (configurable), basic queue protection.
+ * - Puppeteer context pool (configurable), basic queue protection.
  * - Prometheus metrics, simple HTML dashboard.
  */
 
@@ -28,7 +27,21 @@ const STRIP_SCRIPTS = (process.env.PDF_STRIP_SCRIPTS || '1').match(/^(1|true|yes
 const STRIP_PAGE_AT_RULES = (process.env.PDF_STRIP_PAGE_AT_RULES || '1').match(/^(1|true|yes)$/i);
 const RETURN_JSON_BASE64 = (process.env.RETURN_JSON_BASE64 || '1').match(/^(1|true|yes)$/i);
 
-const HEADLESS = process.env.PUPPETEER_HEADLESS || 'new';
+/**
+ * Puppeteer headless mode:
+ * - Since Puppeteer v22+, `headless` accepts boolean or 'shell' (old headless).
+ * - Default here is TRUE (new headless).
+ * - Env accepts: true/1/yes/on/new => true, false/0/no/off => false, 'shell' => 'shell'.
+ */
+const HEADLESS_ENV = process.env.PUPPETEER_HEADLESS;
+const HEADLESS = (() => {
+  if (HEADLESS_ENV == null) return true;
+  if (/^(1|true|yes|on|new)$/i.test(HEADLESS_ENV)) return true;
+  if (/^(0|false|no|off)$/i.test(HEADLESS_ENV)) return false;
+  if (HEADLESS_ENV === 'shell') return 'shell';
+  return true;
+})();
+
 const BROWSER_POOL_SIZE = Math.max(1, Math.min(8, parseInt(process.env.BROWSER_POOL_SIZE || '4', 10)));
 const RENDER_TIMEOUT_MS = parseInt(process.env.RENDER_TIMEOUT_MS || '45000', 10);
 
@@ -40,7 +53,7 @@ const busy = new Set();
 client.collectDefaultMetrics();
 const httpReqs = new client.Counter({ name: 'pdf_http_requests_total', help: 'HTTP requests', labelNames: ['route','status'] });
 const renderDur = new client.Histogram({ name: 'pdf_render_seconds', help: 'Render duration seconds' });
-const poolAvail = new client.Gauge({ name: 'pdf_pool_available', help: 'Incognito contexts available' });
+const poolAvail = new client.Gauge({ name: 'pdf_pool_available', help: 'Browser contexts available' });
 
 function updatePoolGauge() {
   poolAvail.set(contexts.length - busy.size);
@@ -71,12 +84,28 @@ async function initPool() {
     headless: HEADLESS,
     args: ['--no-sandbox','--disable-setuid-sandbox','--font-render-hinting=medium','--disable-dev-shm-usage']
   });
+
+  // Auto-recover on unexpected browser disconnects.
+  browser.on('disconnected', () => {
+    logger.warn('browser disconnected – resetting pool');
+    contexts.splice(0, contexts.length);
+    busy.clear();
+    browser = null;
+    updatePoolGauge();
+  });
+
+  // Puppeteer ≥ v21.11 renamed createIncognitoBrowserContext → createBrowserContext.
+  // We detect at runtime to stay compatible across versions.
+  const createCtx = browser.createBrowserContext
+    ? () => browser.createBrowserContext()
+    : () => browser.createIncognitoBrowserContext();
+
   for (let i=0;i<BROWSER_POOL_SIZE;i++) {
-    const ctx = await browser.createIncognitoBrowserContext();
+    const ctx = await createCtx();
     contexts.push(ctx);
   }
   updatePoolGauge();
-  logger.info({size: BROWSER_POOL_SIZE}, 'browser pool initialized');
+  logger.info({size: BROWSER_POOL_SIZE, api: browser.createBrowserContext ? 'createBrowserContext' : 'createIncognitoBrowserContext'}, 'browser pool initialized');
 }
 
 async function acquireContext() {
@@ -107,8 +136,9 @@ async function renderToBuffer(html, filename) {
     throw err;
   }
   const start = Date.now();
+  let page;
   try {
-    const page = await ctx.newPage();
+    page = await ctx.newPage();
     await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
     await page.setContent(sanitize(html), { waitUntil: 'networkidle0', timeout: RENDER_TIMEOUT_MS });
     const pdf = await page.pdf({
@@ -117,7 +147,6 @@ async function renderToBuffer(html, filename) {
       displayHeaderFooter: false,
       margin: { top: '12mm', bottom: '14mm', left: '12mm', right: '12mm' },
     });
-    await page.close();
     renderDur.observe((Date.now() - start) / 1000);
     if (pdf.length > PDF_MAX_BYTES) {
       const err = new Error(`PDF larger than limit (${pdf.length} > ${PDF_MAX_BYTES})`);
@@ -126,6 +155,9 @@ async function renderToBuffer(html, filename) {
     }
     return pdf;
   } finally {
+    if (page) {
+      try { await page.close(); } catch { /* ignore */ }
+    }
     releaseContext(ctx);
   }
 }
@@ -147,7 +179,7 @@ app.get('/metrics', async (req, res) => {
 
 app.get('/health', (req, res) => {
   updatePoolGauge();
-  res.json({ ok: true, ts: new Date().toISOString(), version: '2.0.0', pool: { size: contexts.length, busy: busy.size } });
+  res.json({ ok: true, ts: new Date().toISOString(), version: '2.1.0', pool: { size: contexts.length, busy: busy.size } });
 });
 
 app.get('/health/html', async (req, res) => {
@@ -155,7 +187,7 @@ app.get('/health/html', async (req, res) => {
   const html = `<!doctype html><meta charset="utf-8"><title>PDF Service /health</title>
   <style>body{font:14px system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:880px;margin:2rem auto}
   .card{border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:.75rem 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}</style>
-  <h1>PDF Service <small>v2.0.0</small></h1>
+  <h1>PDF Service <small>v2.1.0</small></h1>
   <div class="card"><b>Status:</b> OK<br>Time: ${new Date().toISOString()}<br>
   Pool: ${contexts.length} contexts, busy: ${busy.size}<br>
   Host: ${os.hostname()}</div>
