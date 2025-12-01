@@ -5,7 +5,9 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node test-render.js",
+    "selftest": "node test-render.js"
   },
   "dependencies": {
     "express": "^4.19.2",
