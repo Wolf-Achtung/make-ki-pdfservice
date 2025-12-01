@@ -188,14 +188,16 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
     page = await ctx.newPage();
     await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
 
-    // optional: Assets blocken (Low-Fidelity)
+    // optional: Assets blocken (Low-Fidelity) – Puppeteer-kompatible Implementierung
     if (opts.blockAssets) {
-      await page.route('**/*', (route) => {
-        const rt = route.request().resourceType();
-        if (rt === 'image' || rt === 'font') {
-          return route.abort();
+      await page.setRequestInterception(true);
+      page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        if (resourceType === 'image' || resourceType === 'font') {
+          request.abort().catch(() => {});
+        } else {
+          request.continue().catch(() => {});
         }
-        return route.continue();
       });
     }
 
