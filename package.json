@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node index.js",
     "test": "node test-render.js",
-    "selftest": "node test-render.js"
+    "selftest": "node test-render.js",
+    "test:render": "node test/pdf-rendering-test.js",
+    "test:generate-html": "node test/generate-test-html.js"
   },
   "dependencies": {
     "express": "^4.19.2",
