@@ -9,7 +9,9 @@
     "test": "node test-render.js",
     "selftest": "node test-render.js",
     "test:render": "node test/pdf-rendering-test.js",
-    "test:generate-html": "node test/generate-test-html.js"
+    "test:generate-html": "node test/generate-test-html.js",
+    "test:dual-lang": "node test/dual-lang-pdf-test.js",
+    "test:generate-dual-lang": "node test/generate-dual-lang-html.js"
   },
   "dependencies": {
     "express": "^4.19.2",
