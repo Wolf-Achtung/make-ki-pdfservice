@@ -25,7 +25,7 @@ const HTML_LIMIT = process.env.HTML_LIMIT || '20mb';
 const JSON_LIMIT = process.env.JSON_LIMIT || '20mb';
 
 // PDF size policy
-const PDF_MAX_DEFAULT = parseInt(process.env.PDF_MAX_BYTES_DEFAULT || String(10 * 1024 * 1024), 10); // 10 MB
+const PDF_MAX_DEFAULT = parseInt(process.env.PDF_MAX_BYTES_DEFAULT || String(20 * 1024 * 1024), 10); // 20 MB
 const PDF_MAX_CAP      = parseInt(process.env.PDF_MAX_BYTES_CAP      || String(32 * 1024 * 1024), 10); // 32 MB
 const MIN_PDF_BYTES    = 1 * 1024 * 1024; // 1 MB Untergrenze
 
@@ -357,4 +357,5 @@ process.on('SIGTERM', async () => {
 app.listen(PORT, async () => {
   await initPool();
   logger.info({ port: PORT, pool: BROWSER_POOL_SIZE }, 'pdf service listening');
+  logger.info({ pdf_max_default_mb: (PDF_MAX_DEFAULT / 1024 / 1024).toFixed(1), pdf_max_cap_mb: (PDF_MAX_CAP / 1024 / 1024).toFixed(1) }, 'pdf size limits configured');
 });
