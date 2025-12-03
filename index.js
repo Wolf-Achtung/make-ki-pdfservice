@@ -54,6 +54,10 @@ const RENDER_TIMEOUT_MS = parseInt(process.env.RENDER_TIMEOUT_MS || '60000', 10)
 const QUEUE_MAX = Math.max(0, parseInt(process.env.QUEUE_MAX || '24', 10));
 const QUEUE_WAIT_MS = Math.max(5000, parseInt(process.env.QUEUE_WAIT_MS || '25000', 10));
 
+// PDF Optimization settings
+const PDF_SCALE = parseFloat(process.env.PDF_SCALE || '0.94'); // Slightly reduced for smaller files
+const PDF_PRINT_BG = /^(1|true|yes)$/i.test(process.env.PDF_PRINT_BACKGROUND || '0'); // Default: off for smaller files
+
 // -------------------- Metrics --------------------
 client.collectDefaultMetrics();
 const httpReqs  = new client.Counter({ name: 'pdf_http_requests_total', help: 'HTTP requests', labelNames: ['route','status'] });
@@ -73,14 +77,71 @@ function stripAtRules(html) {
   if (!STRIP_PAGE_AT_RULES) return html;
   return html.replace(/@page\s*\{[^}]*\}/gi, '');
 }
+
+// CSS minification helper
+function minifyCSS(css) {
+  let s = css;
+  // Remove CSS comments
+  s = s.replace(/\/\*[\s\S]*?\*\//g, '');
+  // Remove unnecessary whitespace
+  s = s.replace(/\s+/g, ' ');
+  s = s.replace(/\s*([{};:,>+~])\s*/g, '$1');
+  s = s.replace(/;}/g, '}');
+  // Remove last semicolon before closing brace
+  s = s.replace(/;(?=\s*})/g, '');
+  // Reduce box-shadow complexity (smaller files)
+  s = s.replace(/box-shadow:\s*([^;]+)\s*;/gi, (match, value) => {
+    // Simplify multiple shadows to single
+    const shadows = value.split(',');
+    if (shadows.length > 2) {
+      return `box-shadow:${shadows[0].trim()};`;
+    }
+    return match;
+  });
+  return s.trim();
+}
+
+// Consolidate multiple <style> blocks
+function consolidateStyles(html) {
+  const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
+  const styles = [];
+  let match;
+  while ((match = styleRegex.exec(html)) !== null) {
+    styles.push(match[1]);
+  }
+  if (styles.length <= 1) return html;
+
+  // Remove all style blocks
+  let result = html.replace(styleRegex, '');
+  // Add consolidated style block in head
+  const consolidatedCSS = minifyCSS(styles.join('\n'));
+  const headClose = result.indexOf('</head>');
+  if (headClose > -1) {
+    result = result.slice(0, headClose) + `<style>${consolidatedCSS}</style>` + result.slice(headClose);
+  } else {
+    // Fallback: prepend to body
+    result = `<style>${consolidatedCSS}</style>` + result;
+  }
+  return result;
+}
+
 function minifySoft(html) {
   if (!PDF_MINIFY_HTML || !html) return html;
   let s = String(html);
+  // Remove HTML comments
   s = s.replace(/<!--[\s\S]*?-->/g, '');
+  // Consolidate style blocks
+  s = consolidateStyles(s);
+  // Minify inline styles
+  s = s.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (match, css) => {
+    return `<style>${minifyCSS(css)}</style>`;
+  });
+  // Reduce whitespace between tags
   s = s.replace(/>\s+</g, '><');
   s = s.replace(/\s{2,}/g, ' ');
   return s.trim();
 }
+
 function sanitize(html) {
   let h = html || '';
   h = stripScripts(h);
@@ -99,7 +160,16 @@ async function initPool() {
   if (browser) return;
   browser = await puppeteer.launch({
     headless: HEADLESS,
-    args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--font-render-hinting=medium']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--font-render-hinting=medium',
+      // PDF size optimization flags
+      '--disable-skia-runtime-opts',
+      '--disable-gpu-rasterization',
+      '--disable-accelerated-2d-canvas',
+    ]
   });
 
   browser.on('disconnected', () => {
@@ -184,6 +254,8 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
   const ctx = await acquireContextWait();
   const start = Date.now();
   let page;
+  const htmlBytes = Buffer.byteLength(html, 'utf8');
+
   try {
     page = await ctx.newPage();
     await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
@@ -202,23 +274,44 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
     }
 
     const safeHtml = sanitize(html);
+    const safeHtmlBytes = Buffer.byteLength(safeHtml, 'utf8');
     await page.setContent(safeHtml, { waitUntil: 'networkidle0', timeout: RENDER_TIMEOUT_MS });
 
     const pdf = await page.pdf({
       printBackground: !!opts.printBackground,
-      scale: typeof opts.scale === 'number' ? opts.scale : 1,
+      scale: typeof opts.scale === 'number' ? opts.scale : PDF_SCALE,
       format: 'A4',
       displayHeaderFooter: false,
       margin: { top: '12mm', bottom: '14mm', left: '12mm', right: '12mm' },
       preferCSSPageSize: true,
     });
-    renderDur.observe((Date.now() - start) / 1000);
+
+    const durationMs = Date.now() - start;
+    renderDur.observe(durationMs / 1000);
+
+    // Size monitoring
+    const compressionRatio = safeHtmlBytes > 0 ? (pdf.length / safeHtmlBytes).toFixed(2) : 'N/A';
+    logger.info({
+      html_bytes: htmlBytes,
+      html_minified_bytes: safeHtmlBytes,
+      pdf_bytes: pdf.length,
+      compression_ratio: compressionRatio,
+      scale: opts.scale,
+      print_bg: !!opts.printBackground,
+      duration_ms: durationMs,
+    }, 'pdf rendered');
+
+    // Soft warnings
+    if (pdf.length > 15 * 1024 * 1024) {
+      logger.warn({ pdf_bytes: pdf.length, limit_bytes: effectiveMaxBytes }, 'pdf exceeds 15 MB soft limit');
+    }
 
     // Größenprüfung
     if (pdf.length > effectiveMaxBytes) {
       const err = new Error(`PDF larger than limit (${pdf.length} > ${effectiveMaxBytes})`);
       err.status = 413;
-      err.html_bytes = Buffer.byteLength(safeHtml, 'utf8');
+      err.html_bytes = htmlBytes;
+      err.html_minified_bytes = safeHtmlBytes;
       err.pdf_bytes = pdf.length;
       err.limit_bytes = effectiveMaxBytes;
       throw err;
@@ -231,11 +324,12 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
 }
 
 async function renderToBufferAdaptive(html, filename, effectiveMaxBytes) {
-  // 3 Degradierungsstufen, um 413 zu vermeiden
+  // 4 Degradierungsstufen, um 413 zu vermeiden (optimierte Skalierung)
   const passes = [
-    { printBackground: true,  blockAssets: false, scale: 1.0 },
-    { printBackground: false, blockAssets: false, scale: 1.0 },
-    { printBackground: false, blockAssets: true,  scale: 0.90 },
+    { printBackground: PDF_PRINT_BG, blockAssets: false, scale: PDF_SCALE },      // Default optimized
+    { printBackground: false,        blockAssets: false, scale: PDF_SCALE },      // No background
+    { printBackground: false,        blockAssets: false, scale: 0.90 },           // Reduced scale
+    { printBackground: false,        blockAssets: true,  scale: 0.85 },           // Low-fi mode
   ];
   let last;
   for (const p of passes) {
@@ -357,5 +451,10 @@ process.on('SIGTERM', async () => {
 app.listen(PORT, async () => {
   await initPool();
   logger.info({ port: PORT, pool: BROWSER_POOL_SIZE }, 'pdf service listening');
-  logger.info({ pdf_max_default_mb: (PDF_MAX_DEFAULT / 1024 / 1024).toFixed(1), pdf_max_cap_mb: (PDF_MAX_CAP / 1024 / 1024).toFixed(1) }, 'pdf size limits configured');
+  logger.info({
+    pdf_max_default_mb: (PDF_MAX_DEFAULT / 1024 / 1024).toFixed(1),
+    pdf_max_cap_mb: (PDF_MAX_CAP / 1024 / 1024).toFixed(1),
+    pdf_scale: PDF_SCALE,
+    pdf_print_bg: PDF_PRINT_BG,
+  }, 'pdf optimization settings configured');
 });
