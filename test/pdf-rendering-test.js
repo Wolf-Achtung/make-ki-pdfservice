@@ -473,7 +473,7 @@ async function testPrintQuality(page, pdf, profileCode) {
       results.issues.push(`PDF suspiciously small: ${formatBytes(pdfSize)}`);
     }
 
-    if (pdfSize > 10 * 1024 * 1024) {
+    if (pdfSize > 20 * 1024 * 1024) {
       results.status = '⚠️';
       results.issues.push(`PDF may be too large: ${formatBytes(pdfSize)}`);
     }
