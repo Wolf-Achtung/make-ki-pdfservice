@@ -161,14 +161,21 @@ async function initPool() {
   browser = await puppeteer.launch({
     headless: HEADLESS,
     args: [
+      // Core security/sandbox
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--font-render-hinting=medium',
-      // PDF size optimization flags
+      // GPU/rendering optimization for smaller PDFs
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--disable-extensions',
+      // Font rendering (none = smaller files, less hinting overhead)
+      '--font-render-hinting=none',
+      // Additional size optimizations
       '--disable-skia-runtime-opts',
       '--disable-gpu-rasterization',
       '--disable-accelerated-2d-canvas',
+      '--disable-background-timer-throttling',
     ]
   });
 
@@ -258,7 +265,8 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
 
   try {
     page = await ctx.newPage();
-    await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
+    // 96 DPI equivalent viewport for A4 portrait
+    await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 1 });
 
     // optional: Assets blocken (Low-Fidelity) – Puppeteer-kompatible Implementierung
     if (opts.blockAssets) {
@@ -277,12 +285,14 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
     const safeHtmlBytes = Buffer.byteLength(safeHtml, 'utf8');
     await page.setContent(safeHtml, { waitUntil: 'networkidle0', timeout: RENDER_TIMEOUT_MS });
 
+    // A4 portrait, 96 DPI, harmonized margins (15mm)
     const pdf = await page.pdf({
       printBackground: !!opts.printBackground,
       scale: typeof opts.scale === 'number' ? opts.scale : PDF_SCALE,
       format: 'A4',
+      landscape: false,
       displayHeaderFooter: false,
-      margin: { top: '12mm', bottom: '14mm', left: '12mm', right: '12mm' },
+      margin: { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' },
       preferCSSPageSize: true,
     });
 
