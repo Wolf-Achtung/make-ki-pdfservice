@@ -29,6 +29,16 @@ const PDF_MAX_DEFAULT = parseInt(process.env.PDF_MAX_BYTES_DEFAULT || String(20 
 const PDF_MAX_CAP      = parseInt(process.env.PDF_MAX_BYTES_CAP      || String(32 * 1024 * 1024), 10); // 32 MB
 const MIN_PDF_BYTES    = 1 * 1024 * 1024; // 1 MB Untergrenze
 
+// HTML payload limit (incoming HTML before rendering)
+const HTML_MAX_KB = parseInt(process.env.PDF_MAX_HTML_KB || '1024', 10); // Default: 1 MB (1024 KB)
+const HTML_MAX_BYTES = parseInt(process.env.PDF_MAX_HTML_BYTES || String(HTML_MAX_KB * 1024), 10);
+
+// Soft-Landing / Slim-Mode (prepared, not active by default)
+const SLIM_MODE_ENABLED = /^(1|true|yes)$/i.test(process.env.PDF_SLIM_MODE || '0');
+
+// Safety limits
+const PDF_MEMORY_LIMIT_MB = parseInt(process.env.PDF_MEMORY_LIMIT || '1024', 10); // MB
+
 // Sanitizing / Minify
 const STRIP_SCRIPTS = /^(1|true|yes)$/i.test(process.env.PDF_STRIP_SCRIPTS || '1');
 const STRIP_PAGE_AT_RULES = /^(1|true|yes)$/i.test(process.env.PDF_STRIP_PAGE_AT_RULES || '1');
@@ -50,7 +60,10 @@ const HEADLESS = (() => {
 
 // Pool & Queue
 const BROWSER_POOL_SIZE = Math.max(1, Math.min(8, parseInt(process.env.BROWSER_POOL_SIZE || '6', 10)));
-const RENDER_TIMEOUT_MS = parseInt(process.env.RENDER_TIMEOUT_MS || '60000', 10);
+// Timeout: PDF_RENDER_TIMEOUT (in seconds) takes precedence, fallback to RENDER_TIMEOUT_MS (in ms)
+const RENDER_TIMEOUT_MS = process.env.PDF_RENDER_TIMEOUT
+  ? parseInt(process.env.PDF_RENDER_TIMEOUT, 10) * 1000
+  : parseInt(process.env.RENDER_TIMEOUT_MS || '60000', 10);
 const QUEUE_MAX = Math.max(0, parseInt(process.env.QUEUE_MAX || '24', 10));
 const QUEUE_WAIT_MS = Math.max(5000, parseInt(process.env.QUEUE_WAIT_MS || '25000', 10));
 
@@ -148,6 +161,100 @@ function sanitize(html) {
   h = stripAtRules(h);
   h = minifySoft(h);
   return h;
+}
+
+// -------------------- Slim-Mode (Soft-Landing) --------------------
+// Prepared for future use – reduces HTML size when payload exceeds limit
+// Activated via PDF_SLIM_MODE=1 (default: off)
+function slimHtml(html) {
+  let s = String(html);
+  const originalSize = Buffer.byteLength(s, 'utf8');
+
+  // 1. Remove all HTML comments
+  s = s.replace(/<!--[\s\S]*?-->/g, '');
+
+  // 2. Remove data-* attributes (often large, not needed for PDF)
+  s = s.replace(/\s+data-[a-z-]+="[^"]*"/gi, '');
+
+  // 3. Remove empty class attributes
+  s = s.replace(/\s+class=""/g, '');
+
+  // 4. Aggressively minify CSS
+  s = s.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (match, css) => {
+    let minified = css;
+    // Remove CSS comments
+    minified = minified.replace(/\/\*[\s\S]*?\*\//g, '');
+    // Collapse whitespace
+    minified = minified.replace(/\s+/g, ' ');
+    minified = minified.replace(/\s*([{};:,>+~])\s*/g, '$1');
+    // Remove units from zero values
+    minified = minified.replace(/:0(px|em|rem|%)/g, ':0');
+    return `<style>${minified.trim()}</style>`;
+  });
+
+  // 5. Remove excessive whitespace
+  s = s.replace(/>\s{2,}</g, '> <');
+  s = s.replace(/\n\s*\n/g, '\n');
+
+  // 6. Remove inline styles that are purely decorative (optional aggressive)
+  // s = s.replace(/\s+style="[^"]*"/gi, ''); // Too aggressive, disabled
+
+  const slimmedSize = Buffer.byteLength(s, 'utf8');
+  const savedKB = ((originalSize - slimmedSize) / 1024).toFixed(1);
+
+  logger.info({
+    slim_original_bytes: originalSize,
+    slim_result_bytes: slimmedSize,
+    slim_saved_kb: savedKB,
+  }, '[PDF] Slim-Mode applied');
+
+  return s.trim();
+}
+
+// Check HTML payload size and apply slim-mode if enabled
+function checkAndSlimPayload(html) {
+  const incomingBytes = Buffer.byteLength(html, 'utf8');
+  const incomingKB = incomingBytes / 1024;
+  const limitKB = HTML_MAX_KB;
+
+  logger.info({
+    html_incoming_kb: incomingKB.toFixed(1),
+    html_limit_kb: limitKB,
+    html_incoming_bytes: incomingBytes,
+    html_limit_bytes: HTML_MAX_BYTES,
+  }, '[PDF] Incoming HTML payload');
+
+  if (incomingBytes > HTML_MAX_BYTES) {
+    if (SLIM_MODE_ENABLED) {
+      logger.warn({
+        html_kb: incomingKB.toFixed(1),
+        limit_kb: limitKB,
+      }, '[PDF] Payload too large – applying SLIM mode');
+
+      const slimmed = slimHtml(html);
+      const slimmedBytes = Buffer.byteLength(slimmed, 'utf8');
+
+      // Check if slim was enough
+      if (slimmedBytes > HTML_MAX_BYTES) {
+        logger.warn({
+          slimmed_kb: (slimmedBytes / 1024).toFixed(1),
+          limit_kb: limitKB,
+        }, '[PDF] Slimmed payload still exceeds limit – proceeding anyway');
+      }
+
+      return { html: slimmed, wasSlimmed: true, originalKB: incomingKB, slimmedKB: slimmedBytes / 1024 };
+    } else {
+      // Hard fail if slim mode not enabled
+      const err = new Error(`HTML payload ${incomingKB.toFixed(1)}KB exceeds allowed limit ${limitKB}KB`);
+      err.status = 413;
+      err.reason = 'html_payload_too_large';
+      err.html_kb = incomingKB;
+      err.limit_kb = limitKB;
+      throw err;
+    }
+  }
+
+  return { html, wasSlimmed: false, originalKB: incomingKB };
 }
 
 // -------------------- Browser Pool & Queue --------------------
@@ -380,7 +487,9 @@ app.get('/health', (req, res) => {
     pool: { total: contexts.length, busy: busy.size, queue: waitQueue.length },
     headless: HEADLESS,
     pdf: { default_max_bytes: PDF_MAX_DEFAULT, cap_bytes: PDF_MAX_CAP },
+    html: { max_kb: HTML_MAX_KB, max_bytes: HTML_MAX_BYTES, slim_mode: SLIM_MODE_ENABLED },
     limits: { json: JSON_LIMIT, html: HTML_LIMIT },
+    safety: { render_timeout_ms: RENDER_TIMEOUT_MS, memory_limit_mb: PDF_MEMORY_LIMIT_MB },
     always_pdf: ALWAYS_PDF,
     host: os.hostname(),
   });
@@ -408,18 +517,34 @@ async function handleRender(req, res) {
     const { html, filename, maxBytes } = req.body || {};
     if (!html || typeof html !== 'string') {
       httpReqs.labels(route, '400').inc();
+      logger.debug({ route }, '[PDF] Request rejected: html field missing or invalid');
       return res.status(400).json({ ok: false, error: 'html required' });
     }
+
+    // Check HTML payload size (and apply slim-mode if enabled)
+    const payloadCheck = checkAndSlimPayload(html);
+    const processedHtml = payloadCheck.html;
+
+    logger.debug({
+      html_length_bytes: Buffer.byteLength(processedHtml, 'utf8'),
+      html_limit_bytes: HTML_MAX_BYTES,
+      was_slimmed: payloadCheck.wasSlimmed,
+    }, '[PDF] HTML payload validated');
 
     // Request-basiertes Limit (auf Cap geclamped) oder Default
     const reqMax = typeof maxBytes === 'number' ? maxBytes : PDF_MAX_DEFAULT;
     const effectiveMaxBytes = clamp(reqMax, MIN_PDF_BYTES, PDF_MAX_CAP);
 
-    const buf = await renderToBufferAdaptive(html, filename || 'report.pdf', effectiveMaxBytes);
+    const buf = await renderToBufferAdaptive(processedHtml, filename || 'report.pdf', effectiveMaxBytes);
 
     // Diagnostik-Header
     res.setHeader('X-PDF-Bytes', String(buf.length));
     res.setHeader('X-PDF-Limit', String(effectiveMaxBytes));
+    res.setHeader('X-HTML-Original-KB', payloadCheck.originalKB.toFixed(1));
+    if (payloadCheck.wasSlimmed) {
+      res.setHeader('X-HTML-Slimmed', '1');
+      res.setHeader('X-HTML-Slimmed-KB', payloadCheck.slimmedKB.toFixed(1));
+    }
 
     // Immer PDF?
     if (ALWAYS_PDF || !RETURN_JSON_BASE64_DEFAULT) {
@@ -436,13 +561,35 @@ async function handleRender(req, res) {
     const status = e.status || 500;
     httpReqs.labels(route, String(status)).inc();
     const payload = { ok: false, error: String(e.message || e) };
+
     if (status === 413) {
-      payload.reason = 'pdf_too_large';
-      if (typeof e.html_bytes === 'number') payload.html_bytes = e.html_bytes;
-      if (typeof e.pdf_bytes === 'number')  payload.pdf_bytes  = e.pdf_bytes;
-      if (typeof e.limit_bytes === 'number')payload.limit_bytes= e.limit_bytes;
+      // Distinguish between HTML payload too large vs PDF too large
+      if (e.reason === 'html_payload_too_large') {
+        payload.reason = 'html_payload_too_large';
+        if (typeof e.html_kb === 'number') payload.html_kb = e.html_kb;
+        if (typeof e.limit_kb === 'number') payload.limit_kb = e.limit_kb;
+        logger.warn({
+          status,
+          reason: 'html_payload_too_large',
+          html_kb: e.html_kb,
+          limit_kb: e.limit_kb,
+        }, '[PDF] Request rejected: HTML payload exceeds limit');
+      } else {
+        payload.reason = 'pdf_too_large';
+        if (typeof e.html_bytes === 'number') payload.html_bytes = e.html_bytes;
+        if (typeof e.pdf_bytes === 'number')  payload.pdf_bytes  = e.pdf_bytes;
+        if (typeof e.limit_bytes === 'number') payload.limit_bytes = e.limit_bytes;
+        logger.warn({
+          status,
+          reason: 'pdf_too_large',
+          pdf_bytes: e.pdf_bytes,
+          limit_bytes: e.limit_bytes,
+        }, '[PDF] Render failed: PDF exceeds size limit');
+      }
+    } else {
+      logger.warn({ status, err: e.message }, '[PDF] Render failed');
     }
-    logger.warn({ status, err: e.message }, 'render failed');
+
     return res.status(status).json(payload);
   }
 }
@@ -460,11 +607,20 @@ process.on('SIGTERM', async () => {
 
 app.listen(PORT, async () => {
   await initPool();
-  logger.info({ port: PORT, pool: BROWSER_POOL_SIZE }, 'pdf service listening');
+  logger.info({ port: PORT, pool: BROWSER_POOL_SIZE }, '[PDF] Service listening');
+  logger.info({
+    html_max_kb: HTML_MAX_KB,
+    html_max_bytes: HTML_MAX_BYTES,
+    slim_mode_enabled: SLIM_MODE_ENABLED,
+  }, '[PDF] HTML payload limits configured');
   logger.info({
     pdf_max_default_mb: (PDF_MAX_DEFAULT / 1024 / 1024).toFixed(1),
     pdf_max_cap_mb: (PDF_MAX_CAP / 1024 / 1024).toFixed(1),
     pdf_scale: PDF_SCALE,
     pdf_print_bg: PDF_PRINT_BG,
-  }, 'pdf optimization settings configured');
+  }, '[PDF] PDF optimization settings configured');
+  logger.info({
+    render_timeout_sec: RENDER_TIMEOUT_MS / 1000,
+    memory_limit_mb: PDF_MEMORY_LIMIT_MB,
+  }, '[PDF] Safety limits configured');
 });
