@@ -11,15 +11,24 @@ COPY index.js ./
 ENV NODE_ENV=production
 ENV PUPPETEER_HEADLESS=new
 ENV BROWSER_POOL_SIZE=6
-ENV RENDER_TIMEOUT_MS=60000
 
-# Body limits
+# Timeout (seconds, preferred over legacy RENDER_TIMEOUT_MS)
+ENV PDF_RENDER_TIMEOUT=60
+
+# Body limits (express parser)
 ENV JSON_LIMIT=20mb
 ENV HTML_LIMIT=20mb
 
-# PDF size defaults
+# HTML payload limit (incoming HTML before rendering)
+ENV PDF_MAX_HTML_KB=1024
+ENV PDF_SLIM_MODE=0
+
+# PDF size defaults (output PDF)
 ENV PDF_MAX_BYTES_DEFAULT=20971520
 ENV PDF_MAX_BYTES_CAP=33554432
+
+# Safety limits
+ENV PDF_MEMORY_LIMIT=1024
 
 # PDF optimization
 ENV PDF_SCALE=0.94
