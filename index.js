@@ -163,6 +163,117 @@ function sanitize(html) {
   return h;
 }
 
+// -------------------- PDF Options Sanitization --------------------
+// Whitelist of allowed PDF options from Puppeteer page.pdf()
+const ALLOWED_PDF_FORMATS = new Set(['A4', 'Letter', 'Legal', 'A3', 'A5', 'Tabloid']);
+const MARGIN_VALUE_REGEX = /^\d+(\.\d+)?(mm|cm|in|px)$/;
+const MAX_TEMPLATE_LENGTH = 20000; // 20k chars max for header/footer templates
+
+/**
+ * Sanitize pdf_options from request to prevent misuse.
+ * Only whitelisted keys are allowed, with type/value validation.
+ * @param {Object} input - Raw pdf_options from request
+ * @returns {Object} - Sanitized options safe for Puppeteer
+ */
+function sanitizePdfOptions(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {};
+  }
+
+  const result = {};
+  const appliedKeys = [];
+
+  // format: string, must be in allowed set
+  if (input.format !== undefined) {
+    const fmt = String(input.format);
+    if (ALLOWED_PDF_FORMATS.has(fmt)) {
+      result.format = fmt;
+      appliedKeys.push('format');
+    } else {
+      logger.debug({ requested_format: fmt }, '[PDF] Invalid format, using default A4');
+    }
+  }
+
+  // printBackground: boolean
+  if (input.printBackground !== undefined) {
+    result.printBackground = !!input.printBackground;
+    appliedKeys.push('printBackground');
+  }
+
+  // displayHeaderFooter: boolean
+  if (input.displayHeaderFooter !== undefined) {
+    result.displayHeaderFooter = !!input.displayHeaderFooter;
+    appliedKeys.push('displayHeaderFooter');
+  }
+
+  // headerTemplate: string, max length, strip <script>
+  if (input.headerTemplate !== undefined && typeof input.headerTemplate === 'string') {
+    let tpl = input.headerTemplate;
+    if (tpl.length > MAX_TEMPLATE_LENGTH) {
+      tpl = tpl.substring(0, MAX_TEMPLATE_LENGTH);
+      logger.warn({ original_length: input.headerTemplate.length }, '[PDF] headerTemplate truncated');
+    }
+    // Defensive: strip <script> tags from template
+    tpl = tpl.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    result.headerTemplate = tpl;
+    appliedKeys.push('headerTemplate');
+  }
+
+  // footerTemplate: string, max length, strip <script>
+  if (input.footerTemplate !== undefined && typeof input.footerTemplate === 'string') {
+    let tpl = input.footerTemplate;
+    if (tpl.length > MAX_TEMPLATE_LENGTH) {
+      tpl = tpl.substring(0, MAX_TEMPLATE_LENGTH);
+      logger.warn({ original_length: input.footerTemplate.length }, '[PDF] footerTemplate truncated');
+    }
+    // Defensive: strip <script> tags from template
+    tpl = tpl.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    result.footerTemplate = tpl;
+    appliedKeys.push('footerTemplate');
+  }
+
+  // margin: object with top/right/bottom/left, values must match regex
+  if (input.margin !== undefined && typeof input.margin === 'object' && !Array.isArray(input.margin)) {
+    const sanitizedMargin = {};
+    const marginKeys = ['top', 'right', 'bottom', 'left'];
+    let hasValidMargin = false;
+
+    for (const key of marginKeys) {
+      if (input.margin[key] !== undefined) {
+        const val = String(input.margin[key]);
+        if (MARGIN_VALUE_REGEX.test(val)) {
+          sanitizedMargin[key] = val;
+          hasValidMargin = true;
+        } else {
+          logger.debug({ key, value: val }, '[PDF] Invalid margin value, ignored');
+        }
+      }
+    }
+
+    if (hasValidMargin) {
+      result.margin = sanitizedMargin;
+      appliedKeys.push('margin');
+    }
+  }
+
+  // Log which keys were applied (debug-safe, no full template dump)
+  if (appliedKeys.length > 0) {
+    const logInfo = {
+      applied_keys: appliedKeys,
+    };
+    if (result.format) logInfo.format = result.format;
+    if (result.displayHeaderFooter !== undefined) logInfo.displayHeaderFooter = result.displayHeaderFooter;
+    if (result.printBackground !== undefined) logInfo.printBackground = result.printBackground;
+    if (result.margin) logInfo.margin = Object.keys(result.margin).join(',');
+    if (result.headerTemplate) logInfo.headerTemplate_length = result.headerTemplate.length;
+    if (result.footerTemplate) logInfo.footerTemplate_length = result.footerTemplate.length;
+
+    logger.info(logInfo, '[PDF] pdf_options applied');
+  }
+
+  return result;
+}
+
 // -------------------- Slim-Mode (Soft-Landing) --------------------
 // Prepared for future use – reduces HTML size when payload exceeds limit
 // Activated via PDF_SLIM_MODE=1 (default: off)
@@ -363,7 +474,7 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
+async function renderWithOptions(html, filename, effectiveMaxBytes, opts, pdfOptions = {}) {
   await initPool();
   const ctx = await acquireContextWait();
   const start = Date.now();
@@ -392,31 +503,69 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
     const safeHtmlBytes = Buffer.byteLength(safeHtml, 'utf8');
     await page.setContent(safeHtml, { waitUntil: 'networkidle0', timeout: RENDER_TIMEOUT_MS });
 
-    // A4 portrait, 96 DPI, harmonized margins (15mm)
-    const pdf = await page.pdf({
-      printBackground: !!opts.printBackground,
-      scale: typeof opts.scale === 'number' ? opts.scale : PDF_SCALE,
+    // Default margins (can be overridden by pdfOptions)
+    const defaultMargins = { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' };
+
+    // Build final PDF options: defaults merged with sanitized pdfOptions
+    const pdfConfig = {
+      // Base defaults
       format: 'A4',
       landscape: false,
-      displayHeaderFooter: false,
-      margin: { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' },
       preferCSSPageSize: true,
-    });
+      // Adaptive rendering options
+      printBackground: !!opts.printBackground,
+      scale: typeof opts.scale === 'number' ? opts.scale : PDF_SCALE,
+      // Default: no header/footer
+      displayHeaderFooter: false,
+      // Default margins
+      margin: { ...defaultMargins },
+    };
+
+    // Apply sanitized pdfOptions (whitelist-validated by sanitizePdfOptions)
+    if (pdfOptions.format) {
+      pdfConfig.format = pdfOptions.format;
+    }
+    if (pdfOptions.printBackground !== undefined) {
+      // pdfOptions.printBackground overrides adaptive opts only if explicitly set
+      pdfConfig.printBackground = pdfOptions.printBackground;
+    }
+    if (pdfOptions.displayHeaderFooter !== undefined) {
+      pdfConfig.displayHeaderFooter = pdfOptions.displayHeaderFooter;
+    }
+    if (pdfOptions.displayHeaderFooter) {
+      // When header/footer is enabled, apply templates (with sensible defaults)
+      pdfConfig.headerTemplate = pdfOptions.headerTemplate || '<div></div>';
+      pdfConfig.footerTemplate = pdfOptions.footerTemplate || '<div></div>';
+    }
+    if (pdfOptions.margin) {
+      // Merge margin (partial overrides allowed)
+      pdfConfig.margin = { ...defaultMargins, ...pdfOptions.margin };
+    }
+
+    const pdf = await page.pdf(pdfConfig);
 
     const durationMs = Date.now() - start;
     renderDur.observe(durationMs / 1000);
 
     // Size monitoring
     const compressionRatio = safeHtmlBytes > 0 ? (pdf.length / safeHtmlBytes).toFixed(2) : 'N/A';
-    logger.info({
+    const logPayload = {
       html_bytes: htmlBytes,
       html_minified_bytes: safeHtmlBytes,
       pdf_bytes: pdf.length,
       compression_ratio: compressionRatio,
-      scale: opts.scale,
-      print_bg: !!opts.printBackground,
+      scale: pdfConfig.scale,
+      print_bg: pdfConfig.printBackground,
+      format: pdfConfig.format,
       duration_ms: durationMs,
-    }, 'pdf rendered');
+    };
+    // Add pdf_options info (debug-safe: no template content)
+    if (pdfConfig.displayHeaderFooter) {
+      logPayload.header_footer = true;
+      if (pdfConfig.footerTemplate) logPayload.footer_template_length = pdfConfig.footerTemplate.length;
+      if (pdfConfig.headerTemplate) logPayload.header_template_length = pdfConfig.headerTemplate.length;
+    }
+    logger.info(logPayload, 'pdf rendered');
 
     // Soft warnings
     if (pdf.length > 15 * 1024 * 1024) {
@@ -440,7 +589,7 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts) {
   }
 }
 
-async function renderToBufferAdaptive(html, filename, effectiveMaxBytes) {
+async function renderToBufferAdaptive(html, filename, effectiveMaxBytes, pdfOptions = {}) {
   // 4 Degradierungsstufen, um 413 zu vermeiden (optimierte Skalierung)
   const passes = [
     { printBackground: PDF_PRINT_BG, blockAssets: false, scale: PDF_SCALE },      // Default optimized
@@ -451,7 +600,7 @@ async function renderToBufferAdaptive(html, filename, effectiveMaxBytes) {
   let last;
   for (const p of passes) {
     try {
-      return await renderWithOptions(html, filename, effectiveMaxBytes, p);
+      return await renderWithOptions(html, filename, effectiveMaxBytes, p, pdfOptions);
     } catch (e) {
       last = e;
       if (e && e.status === 413) {
@@ -488,6 +637,12 @@ app.get('/health', (req, res) => {
     headless: HEADLESS,
     pdf: { default_max_bytes: PDF_MAX_DEFAULT, cap_bytes: PDF_MAX_CAP },
     html: { max_kb: HTML_MAX_KB, max_bytes: HTML_MAX_BYTES, slim_mode: SLIM_MODE_ENABLED },
+    pdf_options: {
+      supported: true,
+      allowed_keys: ['format', 'printBackground', 'displayHeaderFooter', 'headerTemplate', 'footerTemplate', 'margin'],
+      allowed_formats: Array.from(ALLOWED_PDF_FORMATS),
+      max_template_length: MAX_TEMPLATE_LENGTH,
+    },
     limits: { json: JSON_LIMIT, html: HTML_LIMIT },
     safety: { render_timeout_ms: RENDER_TIMEOUT_MS, memory_limit_mb: PDF_MEMORY_LIMIT_MB },
     always_pdf: ALWAYS_PDF,
@@ -500,10 +655,11 @@ app.get('/health/html', (req, res) => {
   const html = `<!doctype html><meta charset="utf-8"><title>PDF Service /health</title>
   <style>body{font:14px system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:880px;margin:2rem auto}
   .card{border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:.75rem 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}</style>
-  <h1>PDF Service <small>v2.3.0</small></h1>
+  <h1>PDF Service <small>v2.4.0</small></h1>
   <div class="card"><b>Status:</b> OK<br>Time: ${new Date().toISOString()}<br>
   Pool: ${contexts.length} contexts, busy: ${busy.size}, queue: ${waitQueue.length}<br>
   Limits: JSON=${JSON_LIMIT} · HTML=${HTML_LIMIT} · PDF default=${PDF_MAX_DEFAULT} cap=${PDF_MAX_CAP}<br>
+  pdf_options: supported (format, printBackground, displayHeaderFooter, headerTemplate, footerTemplate, margin)<br>
   Always-PDF: ${ALWAYS_PDF}<br>
   Host: ${os.hostname()}</div>
   <p><a href="/metrics">/metrics</a></p>`;
@@ -514,7 +670,7 @@ app.get('/health/html', (req, res) => {
 async function handleRender(req, res) {
   const route = req.path;
   try {
-    const { html, filename, maxBytes } = req.body || {};
+    const { html, filename, maxBytes, pdf_options } = req.body || {};
     if (!html || typeof html !== 'string') {
       httpReqs.labels(route, '400').inc();
       logger.debug({ route }, '[PDF] Request rejected: html field missing or invalid');
@@ -525,17 +681,22 @@ async function handleRender(req, res) {
     const payloadCheck = checkAndSlimPayload(html);
     const processedHtml = payloadCheck.html;
 
+    // Sanitize pdf_options (whitelist validation)
+    const sanitizedPdfOptions = sanitizePdfOptions(pdf_options);
+    const hasPdfOptions = Object.keys(sanitizedPdfOptions).length > 0;
+
     logger.debug({
       html_length_bytes: Buffer.byteLength(processedHtml, 'utf8'),
       html_limit_bytes: HTML_MAX_BYTES,
       was_slimmed: payloadCheck.wasSlimmed,
+      has_pdf_options: hasPdfOptions,
     }, '[PDF] HTML payload validated');
 
     // Request-basiertes Limit (auf Cap geclamped) oder Default
     const reqMax = typeof maxBytes === 'number' ? maxBytes : PDF_MAX_DEFAULT;
     const effectiveMaxBytes = clamp(reqMax, MIN_PDF_BYTES, PDF_MAX_CAP);
 
-    const buf = await renderToBufferAdaptive(processedHtml, filename || 'report.pdf', effectiveMaxBytes);
+    const buf = await renderToBufferAdaptive(processedHtml, filename || 'report.pdf', effectiveMaxBytes, sanitizedPdfOptions);
 
     // Diagnostik-Header
     res.setHeader('X-PDF-Bytes', String(buf.length));
@@ -544,6 +705,12 @@ async function handleRender(req, res) {
     if (payloadCheck.wasSlimmed) {
       res.setHeader('X-HTML-Slimmed', '1');
       res.setHeader('X-HTML-Slimmed-KB', payloadCheck.slimmedKB.toFixed(1));
+    }
+    if (hasPdfOptions) {
+      res.setHeader('X-PDF-Options-Applied', '1');
+      if (sanitizedPdfOptions.displayHeaderFooter) {
+        res.setHeader('X-PDF-HeaderFooter', '1');
+      }
     }
 
     // Immer PDF?
