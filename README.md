@@ -39,6 +39,23 @@ Render-only PDF microservice for the KI-Status-Report.
 - `X-HTML-Original-KB` – Original HTML payload size
 - `X-HTML-Slimmed` – Present if slim-mode was applied
 - `X-HTML-Slimmed-KB` – Size after slim-mode
+- `X-PDF-Debug-Dump-Id` – Present when `X-PDF-Debug-Dump: 1` was sent
+- `X-PDF-Debug-Dump-Dir` – Directory where dump files were written
+
+## Debug HTML Dump (opt-in)
+
+Set request header `X-PDF-Debug-Dump: 1` to capture the HTML at four
+pipeline stages. The server writes four files to `PDF_DEBUG_DUMP_DIR`
+(default `/tmp`) and returns the dump id in `X-PDF-Debug-Dump-Id`.
+
+Files written (per request):
+- `pdf-dump-<id>-1-raw.html` — HTML as received, before any mutation
+- `pdf-dump-<id>-2-stripped.html` — after `stripScripts` + `stripAtRules`
+- `pdf-dump-<id>-3-consolidated.html` — after `minifySoft` / `consolidateStyles`
+- `pdf-dump-<id>-4-rendered.html` — `page.content()` after `setContent`, before `page.pdf()`
+
+Logs include marker `[PDF-DEBUG-DUMP]` with full paths. Default code
+path is unchanged when the header is absent.
 
 ## Error Responses
 

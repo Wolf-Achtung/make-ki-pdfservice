@@ -13,6 +13,7 @@ const rateLimit = require('express-rate-limit');
 const client = require('prom-client');
 const pino = require('pino');
 const os = require('os');
+const fs = require('fs');
 const puppeteer = require('puppeteer');
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -155,12 +156,44 @@ function minifySoft(html) {
   return s.trim();
 }
 
-function sanitize(html) {
+function sanitize(html, dumper) {
   let h = html || '';
+  if (dumper) dumper.dump('1-raw', h);
   h = stripScripts(h);
   h = stripAtRules(h);
+  if (dumper) dumper.dump('2-stripped', h);
   h = minifySoft(h);
+  if (dumper) dumper.dump('3-consolidated', h);
   return h;
+}
+
+// -------------------- Debug HTML Dump (opt-in via X-PDF-Debug-Dump: 1) --------------------
+// Writes intermediate HTML stages to /tmp for diagnostic purposes.
+// Activated per request — zero impact when header is absent.
+const DEBUG_DUMP_DIR = process.env.PDF_DEBUG_DUMP_DIR || '/tmp';
+
+function makeDumper(enabled) {
+  if (!enabled) return null;
+  const ts = Date.now();
+  const rand = Math.random().toString(36).slice(2, 8);
+  const id = `${ts}-${rand}`;
+  return {
+    id,
+    dump(stage, content) {
+      const filePath = `${DEBUG_DUMP_DIR}/pdf-dump-${id}-${stage}.html`;
+      try {
+        fs.writeFileSync(filePath, content == null ? '' : String(content), 'utf8');
+        logger.info({
+          stage,
+          path: filePath,
+          bytes: Buffer.byteLength(content == null ? '' : String(content), 'utf8'),
+          dump_id: id,
+        }, '[PDF-DEBUG-DUMP] stage written');
+      } catch (e) {
+        logger.warn({ stage, path: filePath, err: e.message, dump_id: id }, '[PDF-DEBUG-DUMP] write failed');
+      }
+    },
+  };
 }
 
 // -------------------- PDF Options Sanitization --------------------
@@ -474,7 +507,7 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-async function renderWithOptions(html, filename, effectiveMaxBytes, opts, pdfOptions = {}) {
+async function renderWithOptions(html, filename, effectiveMaxBytes, opts, pdfOptions = {}, dumper = null) {
   await initPool();
   const ctx = await acquireContextWait();
   const start = Date.now();
@@ -499,9 +532,18 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts, pdfOpt
       });
     }
 
-    const safeHtml = sanitize(html);
+    const safeHtml = sanitize(html, dumper);
     const safeHtmlBytes = Buffer.byteLength(safeHtml, 'utf8');
     await page.setContent(safeHtml, { waitUntil: 'networkidle0', timeout: RENDER_TIMEOUT_MS });
+
+    if (dumper) {
+      try {
+        const rendered = await page.content();
+        dumper.dump('4-rendered', rendered);
+      } catch (e) {
+        logger.warn({ err: e.message, dump_id: dumper.id }, '[PDF-DEBUG-DUMP] page.content() failed');
+      }
+    }
 
     // Default margins (can be overridden by pdfOptions)
     const defaultMargins = { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' };
@@ -589,7 +631,7 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts, pdfOpt
   }
 }
 
-async function renderToBufferAdaptive(html, filename, effectiveMaxBytes, pdfOptions = {}) {
+async function renderToBufferAdaptive(html, filename, effectiveMaxBytes, pdfOptions = {}, dumper = null) {
   // 4 Degradierungsstufen, um 413 zu vermeiden (optimierte Skalierung)
   const passes = [
     { printBackground: PDF_PRINT_BG, blockAssets: false, scale: PDF_SCALE },      // Default optimized
@@ -598,9 +640,13 @@ async function renderToBufferAdaptive(html, filename, effectiveMaxBytes, pdfOpti
     { printBackground: false,        blockAssets: true,  scale: 0.85 },           // Low-fi mode
   ];
   let last;
+  let passIndex = 0;
   for (const p of passes) {
+    // Only dump on the first pass — later passes are 413-driven retries
+    const passDumper = passIndex === 0 ? dumper : null;
+    passIndex += 1;
     try {
-      return await renderWithOptions(html, filename, effectiveMaxBytes, p, pdfOptions);
+      return await renderWithOptions(html, filename, effectiveMaxBytes, p, pdfOptions, passDumper);
     } catch (e) {
       last = e;
       if (e && e.status === 413) {
@@ -669,12 +715,22 @@ app.get('/health/html', (req, res) => {
 // Core render handler (shared)
 async function handleRender(req, res) {
   const route = req.path;
+  // Opt-in HTML dump: header X-PDF-Debug-Dump must be exactly '1'
+  const debugDumpHeader = req.headers['x-pdf-debug-dump'];
+  const dumper = makeDumper(debugDumpHeader === '1' || debugDumpHeader === 1);
   try {
     const { html, filename, maxBytes, pdf_options } = req.body || {};
     if (!html || typeof html !== 'string') {
       httpReqs.labels(route, '400').inc();
       logger.debug({ route }, '[PDF] Request rejected: html field missing or invalid');
       return res.status(400).json({ ok: false, error: 'html required' });
+    }
+    if (dumper) {
+      logger.info({
+        dump_id: dumper.id,
+        dump_dir: DEBUG_DUMP_DIR,
+        route,
+      }, '[PDF-DEBUG-DUMP] enabled for this request');
     }
 
     // Check HTML payload size (and apply slim-mode if enabled)
@@ -696,11 +752,15 @@ async function handleRender(req, res) {
     const reqMax = typeof maxBytes === 'number' ? maxBytes : PDF_MAX_DEFAULT;
     const effectiveMaxBytes = clamp(reqMax, MIN_PDF_BYTES, PDF_MAX_CAP);
 
-    const buf = await renderToBufferAdaptive(processedHtml, filename || 'report.pdf', effectiveMaxBytes, sanitizedPdfOptions);
+    const buf = await renderToBufferAdaptive(processedHtml, filename || 'report.pdf', effectiveMaxBytes, sanitizedPdfOptions, dumper);
 
     // Diagnostik-Header
     res.setHeader('X-PDF-Bytes', String(buf.length));
     res.setHeader('X-PDF-Limit', String(effectiveMaxBytes));
+    if (dumper) {
+      res.setHeader('X-PDF-Debug-Dump-Id', dumper.id);
+      res.setHeader('X-PDF-Debug-Dump-Dir', DEBUG_DUMP_DIR);
+    }
     res.setHeader('X-HTML-Original-KB', payloadCheck.originalKB.toFixed(1));
     if (payloadCheck.wasSlimmed) {
       res.setHeader('X-HTML-Slimmed', '1');
