@@ -117,6 +117,10 @@ function minifyCSS(css) {
 
 // Consolidate multiple <style> blocks
 function consolidateStyles(html) {
+  if (process.env.PDF_CONSOLIDATE_STYLES !== "1") {
+    console.log("[pdfservice] consolidateStyles: SKIPPED (flag off)");
+    return html;
+  }
   const styleRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi;
   const styles = [];
   let match;
@@ -835,6 +839,7 @@ process.on('SIGTERM', async () => {
 app.listen(PORT, async () => {
   await initPool();
   logger.info({ port: PORT, pool: BROWSER_POOL_SIZE }, '[PDF] Service listening');
+  console.log(`[pdfservice] PDF_CONSOLIDATE_STYLES=${process.env.PDF_CONSOLIDATE_STYLES ?? "(unset → off)"}`);
   logger.info({
     html_max_kb: HTML_MAX_KB,
     html_max_bytes: HTML_MAX_BYTES,
