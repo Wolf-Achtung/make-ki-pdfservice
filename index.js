@@ -549,17 +549,18 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts, pdfOpt
       }
     }
 
-    // FIX-1027.5.3: @page liefert margin (preferCSSPageSize); page.pdf-margin auf 0,
-    // sonst doppelte Margin → Content-Cutoff S.4.
     // Default margins (can be overridden by pdfOptions)
-    const defaultMargins = { top: '0', bottom: '0', left: '0', right: '0' };
+    const defaultMargins = { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' };
 
     // Build final PDF options: defaults merged with sanitized pdfOptions
     const pdfConfig = {
       // Base defaults
       format: 'A4',
       landscape: false,
-      preferCSSPageSize: true,
+      // FIX-1027.5.3: preferCSSPageSize=false — @page-margin doppelte sonst
+      // zum page.pdf-margin (Cutoff S.4). format:'A4' bleibt (R2 kein Letter-Kipp).
+      // @page @bottom-* ist toter Code in Chromium; R1-Seitenzahl via footerTemplate.
+      preferCSSPageSize: false,
       // Adaptive rendering options
       printBackground: !!opts.printBackground,
       scale: typeof opts.scale === 'number' ? opts.scale : PDF_SCALE,
