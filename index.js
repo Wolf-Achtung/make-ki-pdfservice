@@ -549,8 +549,10 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts, pdfOpt
       }
     }
 
+    // FIX-1027.5.3: @page liefert margin (preferCSSPageSize); page.pdf-margin auf 0,
+    // sonst doppelte Margin → Content-Cutoff S.4.
     // Default margins (can be overridden by pdfOptions)
-    const defaultMargins = { top: '15mm', bottom: '15mm', left: '15mm', right: '15mm' };
+    const defaultMargins = { top: '0', bottom: '0', left: '0', right: '0' };
 
     // Build final PDF options: defaults merged with sanitized pdfOptions
     const pdfConfig = {
