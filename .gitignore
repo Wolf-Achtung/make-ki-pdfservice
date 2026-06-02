@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# npm lockfile (not tracked in this repo)
+package-lock.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
