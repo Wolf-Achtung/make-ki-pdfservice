@@ -14,6 +14,9 @@ const client = require('prom-client');
 const pino = require('pino');
 const os = require('os');
 const fs = require('fs');
+const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
 const puppeteer = require('puppeteer');
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
@@ -175,6 +178,10 @@ function sanitize(html, dumper) {
 // Writes intermediate HTML stages to /tmp for diagnostic purposes.
 // Activated per request — zero impact when header is absent.
 const DEBUG_DUMP_DIR = process.env.PDF_DEBUG_DUMP_DIR || '/tmp';
+// Server-side gate for the debug dump. The X-PDF-Debug-Dump request header is
+// only honored when the operator has enabled dumping here; otherwise a client
+// cannot make the service write files to disk (prevents disk-fill DoS).
+const DEBUG_DUMP_ALLOWED = /^(1|true|yes)$/i.test(process.env.PDF_DEBUG_DUMP || '0');
 
 function makeDumper(enabled) {
   if (!enabled) return null;
@@ -198,6 +205,74 @@ function makeDumper(enabled) {
       }
     },
   };
+}
+
+// -------------------- Security: auth + SSRF guard --------------------
+// Opt-in shared-secret auth. When PDF_SHARED_SECRET is unset the endpoint stays
+// open (no behavior change vs. today); when set, callers must send a matching
+// X-PDF-Secret header (compared in constant time).
+const PDF_SHARED_SECRET = process.env.PDF_SHARED_SECRET || '';
+
+function isAuthorized(req) {
+  if (!PDF_SHARED_SECRET) return true;
+  const provided = String(req.headers['x-pdf-secret'] || '');
+  const a = Buffer.from(provided);
+  const b = Buffer.from(PDF_SHARED_SECRET);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// SSRF guard for sub-resources referenced by the rendered HTML. Blocks non-http(s)
+// schemes (file:, ftp:, ...) and any request whose host is/resolves to a
+// private/loopback/link-local address (incl. cloud metadata 169.254.169.254).
+// Enabled by default; set PDF_SSRF_GUARD=0 to disable. data:/blob:/about: pass.
+const SSRF_GUARD = !/^(0|false|no)$/i.test(process.env.PDF_SSRF_GUARD || '1');
+
+function isPrivateIPv4(ip) {
+  const p = ip.split('.').map(Number);
+  if (p.length !== 4 || p.some((n) => Number.isNaN(n))) return false;
+  const [a, b] = p;
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;              // link-local + metadata
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;    // CGNAT
+  return false;
+}
+
+function isPrivateIPv6(ip) {
+  const s = ip.toLowerCase();
+  if (s === '::1' || s === '::') return true;
+  if (s.startsWith('fe80')) return true;                // link-local
+  if (s.startsWith('fc') || s.startsWith('fd')) return true; // unique-local
+  const m = s.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);   // IPv4-mapped
+  if (m) return isPrivateIPv4(m[1]);
+  return false;
+}
+
+function isPrivateAddress(ip) {
+  const kind = net.isIP(ip);
+  if (kind === 4) return isPrivateIPv4(ip);
+  if (kind === 6) return isPrivateIPv6(ip);
+  return false;
+}
+
+async function isBlockedRequestUrl(rawUrl) {
+  let u;
+  try { u = new URL(rawUrl); } catch { return true; }
+  const scheme = u.protocol.toLowerCase();
+  if (scheme === 'data:' || scheme === 'about:' || scheme === 'blob:') return false;
+  if (scheme !== 'http:' && scheme !== 'https:') return true; // file:, ftp:, ...
+  const host = u.hostname.replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost') ||
+      host.endsWith('.internal') || host.endsWith('.local')) return true;
+  if (net.isIP(host)) return isPrivateAddress(host);
+  try {
+    const addrs = await dns.lookup(host, { all: true });
+    return addrs.some((a) => isPrivateAddress(a.address));
+  } catch {
+    return true; // fail closed if the host cannot be resolved
+  }
 }
 
 // -------------------- PDF Options Sanitization --------------------
@@ -523,15 +598,24 @@ async function renderWithOptions(html, filename, effectiveMaxBytes, opts, pdfOpt
     // 96 DPI equivalent viewport for A4 portrait
     await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 1 });
 
-    // optional: Assets blocken (Low-Fidelity) – Puppeteer-kompatible Implementierung
-    if (opts.blockAssets) {
+    // Request interception: SSRF guard (block internal/non-http targets) plus
+    // optional low-fidelity asset blocking. Interception is set once; a single
+    // handler applies both concerns.
+    if (SSRF_GUARD || opts.blockAssets) {
       await page.setRequestInterception(true);
-      page.on('request', (request) => {
-        const resourceType = request.resourceType();
-        if (resourceType === 'image' || resourceType === 'font') {
-          request.abort().catch(() => {});
-        } else {
+      page.on('request', async (request) => {
+        try {
+          const resourceType = request.resourceType();
+          if (opts.blockAssets && (resourceType === 'image' || resourceType === 'font')) {
+            return void request.abort().catch(() => {});
+          }
+          if (SSRF_GUARD && (await isBlockedRequestUrl(request.url()))) {
+            logger.warn({ url: request.url(), resourceType }, '[PDF-SSRF] blocked sub-resource request');
+            return void request.abort().catch(() => {});
+          }
           request.continue().catch(() => {});
+        } catch (e) {
+          request.abort().catch(() => {});
         }
       });
     }
@@ -669,6 +753,9 @@ async function renderToBufferAdaptive(html, filename, effectiveMaxBytes, pdfOpti
 // -------------------- App --------------------
 const app = express();
 app.set('x-powered-by', false);
+// Behind Railway's proxy, honor X-Forwarded-For so the rate limiter keys on the
+// real client IP instead of the proxy address. Defaults to 1 hop.
+app.set('trust proxy', Number(process.env.TRUST_PROXY || 1));
 app.use(helmet());
 app.use(express.json({ limit: JSON_LIMIT }));
 app.use(express.urlencoded({ extended: false, limit: HTML_LIMIT }));
@@ -722,9 +809,15 @@ app.get('/health/html', (req, res) => {
 // Core render handler (shared)
 async function handleRender(req, res) {
   const route = req.path;
-  // Opt-in HTML dump: header X-PDF-Debug-Dump must be exactly '1'
+  if (!isAuthorized(req)) {
+    httpReqs.labels(route, '401').inc();
+    logger.warn({ route }, '[PDF] Request rejected: missing/invalid X-PDF-Secret');
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+  // Opt-in HTML dump: header X-PDF-Debug-Dump must be exactly '1' AND the
+  // operator must have enabled dumping server-side (PDF_DEBUG_DUMP).
   const debugDumpHeader = req.headers['x-pdf-debug-dump'];
-  const dumper = makeDumper(debugDumpHeader === '1' || debugDumpHeader === 1);
+  const dumper = makeDumper(DEBUG_DUMP_ALLOWED && (debugDumpHeader === '1' || debugDumpHeader === 1));
   try {
     const { html, filename, maxBytes, pdf_options } = req.body || {};
     if (!html || typeof html !== 'string') {
